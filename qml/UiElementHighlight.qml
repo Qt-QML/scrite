@@ -29,6 +29,7 @@ Item {
     property string description
     property int descriptionPosition: Item.Right
     property bool uiElementBoxVisible: false
+    property bool highlightAnimationEnabled: true
 
     signal done()
     signal scaleAnimationDone()
@@ -73,10 +74,10 @@ Item {
                 font.bold: true
                 font.pointSize: Scrite.app.idealFontPointSize+2
                 color: accentColors.highlight.text
-                leftPadding: (descriptionPosition === Item.Right ? descIcon.width : 0) + 5
-                rightPadding: (descriptionPosition === Item.Left ? descIcon.width : 0) + 5
-                topPadding: (descriptionPosition === Item.Bottom ? descIcon.width : 0) + 5
-                bottomPadding: (descriptionPosition === Item.Top ? descIcon.width : 0) + 5
+                leftPadding: (descriptionPosition === Item.Right ? descIcon.width : (descriptionPosition === Item.Bottom || descriptionPosition === Item.Top ? 20 : 0)) + 5
+                rightPadding: (descriptionPosition === Item.Left ? descIcon.width : (descriptionPosition === Item.Bottom || descriptionPosition === Item.Top ? 20 : 0)) + 5
+                topPadding: descriptionPosition === Item.Bottom || descriptionPosition === Item.Top ? descIcon.height : 10
+                bottomPadding: descriptionPosition === Item.Top || descriptionPosition === Item.Bottom ? descIcon.height : 10
 
                 Image {
                     id: descIcon
@@ -135,7 +136,7 @@ Item {
         NumberAnimation {
             target: uiElement
             property: "scale"
-            from: 1; to: 2
+            from: 1; to: highlightAnimationEnabled ? 2 : 1
             duration: 500
         }
 
@@ -146,7 +147,7 @@ Item {
         NumberAnimation {
             target: uiElement
             property: "scale"
-            from: 2; to: 1
+            from: highlightAnimationEnabled ? 2 : 1; to: 1
             duration: 500
         }
 

@@ -542,6 +542,11 @@ public:
     bool isForceSyncDocument() const { return m_forceSyncDocument; }
     Q_SIGNAL void forceSyncDocumentChanged();
 
+    Q_PROPERTY(bool applyLanguageFonts READ isApplyLanguageFonts WRITE setApplyLanguageFonts NOTIFY applyLanguageFontsChanged)
+    void setApplyLanguageFonts(bool val);
+    bool isApplyLanguageFonts() const { return m_applyLanguageFonts; }
+    Q_SIGNAL void applyLanguageFontsChanged();
+
     Q_PROPERTY(QString nextTabFormatAsString READ nextTabFormatAsString NOTIFY nextTabFormatChanged)
     QString nextTabFormatAsString() const;
 
@@ -644,7 +649,6 @@ private:
     Q_SLOT void onSpellCheckUpdated();
     void onContentsChange(int from, int charsRemoved, int charsAdded);
     void syncSceneFromDocument(int nrBlocks = -1);
-    bool eventFilter(QObject *object, QEvent *event);
 
     void evaluateAutoCompleteHints();
     void setAutoCompleteHintsFor(SceneElement::Type val);
@@ -670,6 +674,7 @@ private:
     bool m_sceneIsBeingReset = false;
     bool m_forceSyncDocument = false;
     bool m_spellCheckEnabled = true;
+    bool m_applyLanguageFonts = false;
     QString m_completionPrefix;
     bool m_initializingDocument = false;
     QStringList m_characterNames;

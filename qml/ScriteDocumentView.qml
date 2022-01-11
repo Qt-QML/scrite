@@ -123,6 +123,7 @@ Item {
 
         property bool pausePageAndTimeComputation: false
         property bool highlightCurrentLine: true
+        property bool applyUserDefinedLanguageFonts: true
     }
 
     Settings {
@@ -1047,7 +1048,7 @@ Item {
                             text: "About"
                             onClicked: showAboutDialog()
 
-                            Announcement.onIncoming: {
+                            Announcement.onIncoming: (type,data) => {
                                 const stype = "" + type
                                 const idata = data
                                 if(stype === "72892ED6-BA58-47EC-B045-E92D9EC1C47A") {
@@ -1528,7 +1529,7 @@ Item {
                 }
 
                 function activateTab(index) {
-                    if(index < 0 || index >= tabs.length)
+                    if(index < 0 || index >= tabs.length || pdfViewer.active)
                         return
                     var tab = tabs[index]
                     if(!tab.visible)
@@ -1653,41 +1654,6 @@ Item {
         }
     }
 
-    Rectangle {
-        id: pdfViewerToolBar
-        anchors.left: parent.left
-        anchors.right: parent.right
-        height: 53
-        color: accentColors.c900.background
-        border.width: 1
-        border.color: accentColors.c100.background
-        visible: pdfViewer.active
-        enabled: visible && !notificationsView.visible
-
-        Text {
-            text: pdfViewer.pdfTitle
-            color: accentColors.c900.text
-            elide: Text.ElideMiddle
-            anchors.centerIn: parent
-            width: parent.width * 0.7
-            horizontalAlignment: Text.AlignHCenter
-            font.pointSize: Scrite.app.idealFontPointSize + 2
-            font.bold: true
-        }
-
-        Button2 {
-            text: "Close"
-            anchors.verticalCenter: parent.verticalCenter
-            anchors.right: Scrite.app.isMacOSPlatform ? undefined : parent.right
-            anchors.left: Scrite.app.isMacOSPlatform ? parent.left : undefined
-            anchors.rightMargin: 5
-            anchors.leftMargin: 5
-            onClicked: pdfViewer.active = false
-            Material.foreground: accentColors.c500.text
-            Material.background: accentColors.c500.background
-        }
-    }
-
     Loader {
         id: contentLoader
         active: allowContent && !Scrite.document.loading
@@ -1703,6 +1669,34 @@ Item {
 
         property bool allowContent: true
         property string sessionId
+    }
+
+    Rectangle {
+        id: pdfViewerToolBar
+        anchors.left: parent.left
+        anchors.right: parent.right
+        height: 53
+        color: primaryColors.c50.background
+        visible: pdfViewer.active
+        enabled: visible && !notificationsView.visible
+
+        Text {
+            text: pdfViewer.pdfTitle
+            color: accentColors.c50.text
+            elide: Text.ElideMiddle
+            anchors.centerIn: parent
+            width: parent.width * 0.8
+            horizontalAlignment: Text.AlignHCenter
+            font.pointSize: Scrite.app.idealFontPointSize + 2
+            font.bold: true
+        }
+
+        Rectangle {
+            width: parent.width
+            height: 1
+            color: primaryColors.borderColor
+            anchors.bottom: parent.bottom
+        }
     }
 
     Loader {
@@ -1752,9 +1746,28 @@ Item {
             pagesPerRow: pdfViewer.pdfPagesPerRow
             allowFileReveal: false
 
+            Component.onCompleted: forceActiveFocus()
+
+            // While this PDF view is active, we don't want shortcuts to be
+            // processed by any other part of the application.
+            EventFilter.target: Scrite.app
+            EventFilter.events: [EventFilter.KeyPress,EventFilter.Shortcut,EventFilter.ShortcutOverride]
+            EventFilter.onFilter: (object,event,result) => {
+                                      result.filter = true
+                                      result.acceptEvent = true
+                                      if(event.type === EventFilter.KeyPress) {
+                                          if(event.key === Qt.Key_Escape) {
+                                              pdfViewer.active = false
+                                              return
+                                          }
+                                      }
+                                  }
+
             FileManager {
                 autoDeleteList: [pdfViewer.pdfFilePath]
             }
+
+            onCloseRequest: pdfViewer.active = false
         }
     }
 
@@ -1920,7 +1933,7 @@ Item {
                             anchors.fill: parent
                             property int currentTabIndex: 0
 
-                            Announcement.onIncoming: {
+                            Announcement.onIncoming: (type,data) => {
                                 var sdata = "" + data
                                 var stype = "" + type
                                 if(showNotebookInStructure) {
@@ -2256,7 +2269,7 @@ Item {
         Loader {
             active: notebookAppFeature.enabled
             sourceComponent: NotebookView {
-                Announcement.onIncoming: {
+                Announcement.onIncoming: (type,data) => {
                     var stype = "" + "190B821B-50FE-4E47-A4B2-BDBB2A13B72C"
                     var sdata = "" + data
                     if(stype === "190B821B-50FE-4E47-A4B2-BDBB2A13B72C")

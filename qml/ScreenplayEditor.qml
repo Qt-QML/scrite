@@ -85,6 +85,14 @@ Rectangle {
         }
     }
 
+    Connections {
+        target: Scrite.document.screenplay
+        enabled: screenplayAdapter.isSourceScreenplay
+        function onRequestEditorAt(index) {
+            contentView.positionViewAtIndex(index, ListView.Beginning)
+        }
+    }
+
     // Ctrl+Shift+N should result in the newly added scene to get keyboard focus
     Connections {
         target: screenplayAdapter.isSourceScreenplay ? Scrite.document : null
@@ -500,6 +508,7 @@ Rectangle {
                                     Transliterator.textDocument: textDocument
                                     Transliterator.cursorPosition: cursorPosition
                                     Transliterator.hasActiveFocus: activeFocus
+                                    Transliterator.applyLanguageFonts: screenplayEditorSettings.applyUserDefinedLanguageFonts
                                     onTextChanged: Scrite.document.screenplay.logline = text
                                     wrapMode: Text.WrapAtWordBoundaryOrAnywhere
                                     placeholderText: "Enter the logline of your screenplay here.."
@@ -577,6 +586,7 @@ Rectangle {
                                 uiElementBoxVisible: true
                                 descriptionPosition: Item.Bottom
                                 description: "Use these buttons to add new a scene, act or episode."
+                                highlightAnimationEnabled: false
                                 onDone: addButtonsAnimator.active = false
                                 Component.onCompleted: instanceSettings.screenplayEditorAddButtonsAnimationShown = true
                             }
@@ -1299,6 +1309,7 @@ Rectangle {
                 onDocumentInitialized: sceneTextEditor.cursorPosition = 0
                 onRequestCursorPosition: Scrite.app.execLater(contentItem, 100, function() { contentItem.assumeFocusAt(position) })
                 property var currentParagraphType: currentElement ? currentElement.type : SceneHeading.Action
+                applyLanguageFonts: screenplayEditorSettings.applyUserDefinedLanguageFonts
                 onCurrentParagraphTypeChanged: {
                     if(currentParagraphType === SceneElement.Action) {
                         ruler.paragraphLeftMargin = 0
@@ -1394,6 +1405,7 @@ Rectangle {
                     Transliterator.textDocument: textDocument
                     Transliterator.cursorPosition: cursorPosition
                     Transliterator.hasActiveFocus: activeFocus
+                    Transliterator.applyLanguageFonts: screenplayEditorSettings.applyUserDefinedLanguageFonts
 
                     SpecialSymbolsSupport {
                         anchors.top: parent.bottom
@@ -1447,7 +1459,7 @@ Rectangle {
                             item.editSceneNumber()
                     }
 
-                    Announcement.onIncoming: {
+                    Announcement.onIncoming: (type,data) => {
                         if(!sceneTextEditor.activeFocus)
                             return
                         var stype = "" + type
@@ -1499,6 +1511,7 @@ Rectangle {
                             Transliterator.textDocument: textDocument
                             Transliterator.cursorPosition: cursorPosition
                             Transliterator.hasActiveFocus: activeFocus
+                            Transliterator.applyLanguageFonts: screenplayEditorSettings.applyUserDefinedLanguageFonts
                             onTextChanged: contentItem.theScene.title = text
                             wrapMode: Text.WrapAtWordBoundaryOrAnywhere
                             placeholderText: "Enter the synopsis of your scene here."
@@ -1523,7 +1536,7 @@ Rectangle {
                                 sceneTextEditor.forceActiveFocus()
                             }
 
-                            Announcement.onIncoming: {
+                            Announcement.onIncoming: (type,data) => {
                                 if(!sceneTextEditor.activeFocus || !screenplayEditorSettings.displaySceneSynopsis)
                                     return
                                 var sdata = "" + data
@@ -1746,6 +1759,7 @@ Rectangle {
                     Transliterator.textDocument: textDocument
                     Transliterator.cursorPosition: cursorPosition
                     Transliterator.hasActiveFocus: activeFocus
+                    Transliterator.applyLanguageFonts: screenplayEditorSettings.applyUserDefinedLanguageFonts
                     Transliterator.onAboutToTransliterate: {
                         contentItem.theScene.beginUndoCapture(false)
                         contentItem.theScene.undoRedoEnabled = false
@@ -2750,7 +2764,7 @@ Rectangle {
                     active: screenplayEditorSettings.displaySceneCharacters && allow
                     sourceComponent: sceneCharactersList
 
-                    Announcement.onIncoming: {
+                    Announcement.onIncoming: (type,data) => {
                         var stype = "" + type
                         var sdata = "" + data
                         if(stype === "E69D2EA0-D26D-4C60-B551-FD3B45C5BE60" && sdata === headingItem.theScene.id) {
@@ -2944,7 +2958,7 @@ Rectangle {
                     onClicked: newCharacterInput.active = true
                 }
 
-                Announcement.onIncoming: {
+                Announcement.onIncoming: (type,data) => {
                     if(!editorHasActiveFocus)
                         return
 
@@ -2997,6 +3011,14 @@ Rectangle {
                     visible: screenplayAdapter.elementCount === 0
                 }
 
+                Connections {
+                    target: Scrite.document.screenplay
+                    enabled: screenplayAdapter.isSourceScreenplay
+                    function onElementMoved(element, from, to) {
+                        Qt.callLater(sceneListView.forceLayout)
+                    }
+                }
+
                 ListView {
                     id: sceneListView
                     anchors.fill: parent
@@ -3010,6 +3032,10 @@ Rectangle {
                     highlightResizeDuration: 0
                     keyNavigationEnabled: false
                     property bool hasEpisodes: screenplayAdapter.isSourceScreenplay ? screenplayAdapter.screenplay.episodeCount > 0 : false
+
+                    FocusTracker.window: Scrite.window
+                    FocusTracker.indicator.target: mainUndoStack
+                    FocusTracker.indicator.property: "sceneListPanelActive"
 
                     header: Rectangle {
                         width: sceneListView.width-1
@@ -3060,6 +3086,7 @@ Rectangle {
                         color: scene ? Qt.tint(scene.color, (screenplayElement.selected ? "#9CFFFFFF" : "#E7FFFFFF"))
                                      : screenplayAdapter.currentIndex === index ? Scrite.app.translucent(accentColors.windowColor, 0.25) : Qt.rgba(0,0,0,0.01)
 
+                        property int elementIndex: index
                         property bool elementIsBreak: screenplayElementType === ScreenplayElement.BreakElementType
                         property bool elementIsEpisodeBreak: screenplayElementType === ScreenplayElement.BreakElementType && breakType === Screenplay.Episode
 
@@ -3173,37 +3200,27 @@ Rectangle {
                             "sceneListView/sceneID": screenplayElement.sceneID
                         }
                         Drag.onActiveChanged: {
+                            screenplayElement.selected = true
+                            moveSelectedElementsAnimation.draggedElement = screenplayElement
                             if(screenplayElementType === ScreenplayElement.BreakElementType)
                                 Scrite.document.screenplay.currentElementIndex = index
                         }
+                        Drag.onDragFinished: sceneListView.forceLayout()
 
                         DropArea {
+                            id: delegateDropArea
                             anchors.fill: parent
                             keys: ["sceneListView/sceneID"]
 
-                            onEntered: {
-                                drag.accepted = true
-                                dropIndicator.visible = true
-                                sceneListView.forceActiveFocus()
-                            }
+                            onEntered: (drag) => {
+                                           drag.acceptProposedAction()
+                                           sceneListView.forceActiveFocus()
+                                       }
 
-                            onExited: {
-                                drag.accepted = true
-                                dropIndicator.visible = false
-                            }
-
-                            onDropped: {
-                                dropIndicator.visible = false
-                                if(screenplayAdapter.isSourceScreenplay) {
-                                    Scrite.app.execLater(sceneListView, 100, function() {
-                                        screenplayAdapter.screenplay.moveSelectedElements(index)
-                                    })
-                                } else {
-                                    var dropSource = drop.source
-                                    Scrite.app.execLater(sceneListView, 100, function() { sceneListView.dropSceneAt(dropSource, index) })
-                                }
-                                drop.acceptProposedAction()
-                            }
+                            onDropped: (drop) => {
+                                           moveSelectedElementsAnimation.targetIndex = delegateItem.elementIndex
+                                           drop.acceptProposedAction()
+                                       }
                         }
 
                         Rectangle {
@@ -3211,7 +3228,7 @@ Rectangle {
                             width: parent.width
                             height: 2
                             color: primaryColors.borderColor
-                            visible: false
+                            visible: delegateDropArea.containsDrag
                         }
 
                         Rectangle {
@@ -3229,51 +3246,70 @@ Rectangle {
                         height: 40
 
                         DropArea {
+                            id: footerDropArea
                             anchors.fill: parent
                             keys: ["sceneListView/sceneID"]
 
-                            onEntered: {
-                                drag.accepted = true
-                                dropIndicator2.visible = true
-                                sceneListView.forceActiveFocus()
-                            }
+                            onEntered: (drag) => {
+                                           drag.acceptProposedAction()
+                                           sceneListView.forceActiveFocus()
+                                       }
 
-                            onExited: {
-                                drag.accepted = true
-                                dropIndicator2.visible = false
-                            }
-
-                            onDropped: {
-                                dropIndicator2.visible = false
-                                var dropSource = drop.source
-                                Scrite.app.execLater(sceneListView, 100, function() { sceneListView.dropSceneAt(dropSource, -1) })
-                                drop.acceptProposedAction()
-                            }
+                            onDropped: (drop) => {
+                                           drop.acceptProposedAction()
+                                           moveSelectedElementsAnimation.targetIndex = screenplayAdapter.elementCount
+                                       }
                         }
 
                         Rectangle {
-                            id: dropIndicator2
                             width: parent.width
                             height: 2
                             color: primaryColors.borderColor
-                            visible: false
+                            visible: footerDropArea.containsDrag
                         }
                     }
 
-                    function dropSceneAt(scene, index) {
-                        if(!screenplayAdapter.isSourceScreenplay)
-                            return
+                    SequentialAnimation {
+                        id: moveSelectedElementsAnimation
 
-                        var fromIndex = Scrite.document.screenplay.indexOfElement(scene)
-                        var toIndex = index < 0 ? index : (fromIndex < index ? index-1 : index)
-                        var curIndex = index < 0 ? Scrite.document.screenplay.elementCount-1 : toIndex
-                        Scrite.document.screenplay.moveElement(scene, toIndex)
-                        model = null
-                        // positionViewAtIndex(curIndex, ListView.Contain)
-                        Qt.callLater( function(ci) {
-                            screenplayAdapter.currentIndex = ci
-                            sceneListView.model = screenplayAdapter
-                        }, curIndex )
+                        property int targetIndex: -1
+                        property ScreenplayElement draggedElement
+                        onTargetIndexChanged: {
+                            if(targetIndex >= 0)
+                                start()
+                        }
+
+                        PauseAnimation { duration: 50 }
+
+                        ScriptAction {
+                            script: {
+                                Scrite.document.screenplay.moveSelectedElements(moveSelectedElementsAnimation.targetIndex)
+                                Qt.callLater(sceneListView.forceLayout)
+                            }
+                        }
+
+                        PauseAnimation { duration: 50 }
+
+                        ScriptAction {
+                            script: sceneListView.forceLayout()
+                        }
+
+                        PauseAnimation { duration: 50 }
+
+                        ScriptAction {
+                            script: {
+                                const draggedElement = moveSelectedElementsAnimation.draggedElement
+                                const targetndex = draggedElement ? Scrite.document.screenplay.indexOfElement(draggedElement) : moveSelectedElementsAnimation.targetIndex
+
+                                moveSelectedElementsAnimation.targetIndex = -1
+                                moveSelectedElementsAnimation.draggedElement = null
+
+                                contentView.positionViewAtIndex(targetndex, ListView.Beginning)
+                                screenplayAdapter.currentIndex = targetndex
+
+                                sceneListView.forceActiveFocus()
+                            }
+                        }
                     }
                 }
             }

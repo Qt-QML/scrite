@@ -100,6 +100,7 @@ Item {
                 return coreSettingsComponent
             }
             pageContentSpacing: 0
+            cornerContent: currentIndex === 1 ? fontSettingsCornerComponent : null
         }
     }
 
@@ -395,26 +396,59 @@ Item {
     }
 
     Component {
+        id: fontSettingsCornerComponent
+
+        Item {
+
+            Text {
+                id: fontSettingsTip
+                width: parent.width-20
+                anchors.bottom: fontSettingsComboBox.top
+                anchors.bottomMargin: 20
+                anchors.horizontalCenter: parent.horizontalCenter
+                font.pointSize: Scrite.app.idealFontPointSize-2
+                horizontalAlignment: Text.AlignLeft
+                wrapMode: Text.WordWrap
+                color: primaryColors.c100.background
+                property string englishFontFamily: Scrite.app.transliterationEngine.languageFont(TransliterationEngine.English).family
+                text: {
+                    if(screenplayEditorSettings.applyUserDefinedLanguageFonts)
+                        return "Custom fonts are used for both display and in PDF & HTML."
+                    return "For display, only '" + englishFontFamily + "' will be used. Custom fonts for languages are used only in exported PDF & HTML files."
+                }
+
+                Announcement.onIncoming: (type,data) => {
+                                             const stype = "" + type
+                                             const sdata = "" + data
+                                             if(stype === "763E8FAD-8681-4F64-B574-F9BB7CF8A7F1") {
+                                                 fontSettingsTip.englishFontFamily = sdata
+                                             }
+                                         }
+            }
+
+            ComboBox2 {
+                id: fontSettingsComboBox
+                anchors.bottom: parent.bottom
+                anchors.bottomMargin: 20
+                anchors.horizontalCenter: parent.horizontalCenter
+                width: parent.width-20
+                model: ["PDF, HTML Only", "Display, PDF, HTML"]
+                currentIndex: screenplayEditorSettings.applyUserDefinedLanguageFonts ? 1 : 0
+                onActivated: (index) => {
+                                 screenplayEditorSettings.applyUserDefinedLanguageFonts = (index === 1)
+                             }
+            }
+        }
+    }
+
+    Component {
         id: fontSettingsComponent
 
         Column {
             id: fontSettingsUi
             spacing: 10
 
-            readonly property var languagePreviewString: [
-                "Greetings",
-                "বাংলা",
-                "ગુજરાતી",
-                "हिन्दी",
-                "ಕನ್ನಡ",
-                "മലയാളം",
-                "मराठी",
-                "ଓଡିଆ",
-                "ਪੰਜਾਬੀ",
-                "संस्कृत",
-                "தமிழ்",
-                "తెలుగు"
-            ]
+            readonly property var languagePreviewString: [ "Greetings", "বাংলা", "ગુજરાતી", "हिन्दी", "ಕನ್ನಡ", "മലയാളം", "मराठी", "ଓଡିଆ", "ਪੰਜਾਬੀ", "संस्कृत", "தமிழ்", "తెలుగు" ]
 
             Item { width: parent.width; height: 20 }
 
@@ -422,6 +456,7 @@ Item {
                 model: Scrite.app.enumerationModelForType("TransliterationEngine", "Language")
 
                 Row {
+                    readonly property int languageIndex: index
                     spacing: 10
                     width: parent.width - 20
                     anchors.horizontalCenter: parent.horizontalCenter
@@ -445,6 +480,8 @@ Item {
                             var family = fontFamilies.families[index]
                             Scrite.app.transliterationEngine.setPreferredFontFamilyForLanguage(modelData.value, family)
                             previewText.font.family = family
+                            if(languageIndex === 0)
+                                Announcement.shout("763E8FAD-8681-4F64-B574-F9BB7CF8A7F1", family)
                         }
                     }
 

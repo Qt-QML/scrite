@@ -32,6 +32,7 @@
 #include <QtConcurrentRun>
 #include <QQuickTextDocument>
 #include <QAbstractTextDocumentLayout>
+#include <QTextBoundaryFinder>
 
 #include <PhTranslateLib>
 
@@ -732,6 +733,17 @@ TransliterationEngine::writingSystemForLanguage(TransliterationEngine::Language 
     return languageWritingSystemMap.value(language);
 }
 
+void TransliterationEngine::Boundary::evalStringLanguageAndFont(const QString &sourceText)
+{
+    if (this->isEmpty())
+        return;
+
+    this->string = sourceText.mid(this->start, (this->end - this->start + 1));
+    this->language = TransliterationEngine::instance()->languageForScript(
+            TransliterationEngine::determineScript(this->string));
+    this->font = TransliterationEngine::instance()->languageFont(this->language);
+}
+
 void TransliterationEngine::Boundary::append(const QChar &ch, int pos)
 {
     string += ch;
@@ -742,60 +754,105 @@ void TransliterationEngine::Boundary::append(const QChar &ch, int pos)
 
 bool TransliterationEngine::Boundary::isEmpty() const
 {
-    return end < 0 || start < 0 || start == end;
+    return end < 0 || start < 0 || (end - start + 1) == 0;
 }
 
 QList<TransliterationEngine::Boundary>
-TransliterationEngine::evaluateBoundaries(const QString &text, bool bundleCommonScriptChars) const
+TransliterationEngine::evaluateBoundaries(const QString &text,
+                                          bool /*bundleCommonScriptChars*/) const
 {
     QList<Boundary> ret;
     if (text.isEmpty())
         return ret;
 
-    bool lettersStarted = false;
-    QChar::Script script = QChar::Script_Latin;
+    // Create a boundary item for each word found in the given text
+    QTextBoundaryFinder boundaryFinder(QTextBoundaryFinder::Word, text);
+    while (boundaryFinder.position() < text.length()) {
+        if (!(boundaryFinder.boundaryReasons().testFlag(QTextBoundaryFinder::StartOfItem))) {
+            if (boundaryFinder.toNextBoundary() == -1) {
+                break;
+            }
+            continue;
+        }
 
-    Boundary item;
-    auto captureBoundary = [&ret, this](Boundary &item, QChar::Script script) {
-        if (!item.string.isEmpty()) {
-            item.language = languageForScript(script);
-            item.font = this->languageFont(item.language);
+        Boundary item;
+        item.start = boundaryFinder.position();
+        item.end = boundaryFinder.toNextBoundary();
+        if (item.end < 0)
+            item.end = text.length() - 1;
+
+        if (item.isEmpty())
+            continue;
+
+        item.evalStringLanguageAndFont(text);
+        ret.append(item);
+    }
+
+    // If no boundaries were found, then the whole text is one boundary.
+    if (ret.isEmpty()) {
+        Boundary item;
+        item.start = 0;
+        item.end = text.length() - 1;
+        if (!item.isEmpty()) {
+            item.evalStringLanguageAndFont(text);
             ret.append(item);
         }
 
-        item = Boundary();
-    };
-
-    for (int index = 0; index < text.length(); index++) {
-        const QChar ch = text.at(index);
-        if (!lettersStarted) {
-            item.append(ch, index);
-
-            if (ch.isLetterOrNumber()) {
-                lettersStarted = true;
-                script = ch.script();
-            }
-
-            continue;
-        }
-
-        //        const bool isSplChar = ch.isSpace() || ch.isDigit() || ch.isPunct() ||
-        //        ch.category() == QChar::Separator_Line; if(isSplChar)
-        //            script = QChar::Script_Latin;
-
-        if (ch.script() == script
-            || (bundleCommonScriptChars && ch.script() == QChar::Script_Common)) {
-            item.append(ch, index);
-            continue;
-        }
-
-        captureBoundary(item, script);
-
-        script = ch.script();
-        item.append(ch, index);
+        return ret;
     }
 
-    captureBoundary(item, script);
+    // If the first few characters were not captured in the boundary, then
+    // capture them now.
+    if (ret.first().start > 0) {
+        Boundary firstItem;
+        firstItem.start = 0;
+        firstItem.end = ret.first().start - 1;
+        if (!firstItem.isEmpty()) {
+            firstItem.evalStringLanguageAndFont(text);
+            ret.prepend(firstItem);
+        }
+    }
+
+    // If the last few characters were not captured in the boundary, then
+    // capture them now.
+    if (ret.last().end < text.length() - 1) {
+        Boundary lastItem;
+        lastItem.start = ret.last().end + 1;
+        lastItem.end = text.length() - 1;
+        if (!lastItem.isEmpty()) {
+            lastItem.evalStringLanguageAndFont(text);
+            ret.append(lastItem);
+        }
+    }
+
+    // Merge boundaries if they belong to the same language.
+    if (ret.size() >= 2) {
+        for (int i = ret.size() - 2; i >= 0; i--) {
+            const Boundary left = ret.at(i);
+            const Boundary right = ret.at(i + 1);
+            if (left.end + 1 != right.start) {
+                Boundary inbetween;
+                inbetween.start = left.end + 1;
+                inbetween.end = right.start - 1;
+                inbetween.evalStringLanguageAndFont(text);
+                ret.insert(i + 1, inbetween);
+            }
+        }
+
+        for (int i = ret.size() - 2; i >= 0; i--) {
+            Boundary &left = ret[i];
+            const Boundary right = ret.at(i + 1);
+            if (left.language == right.language) {
+                left.end = right.end;
+                left.string += right.string;
+                ret.removeAt(i + 1);
+            }
+        }
+    }
+
+    // TODO: break apart a single boundary if it combines two distinct languages
+    // But, we won't do that now. Its rather rare that users will write a single word in
+    // two separate languages.
 
     return ret;
 }
@@ -803,45 +860,37 @@ TransliterationEngine::evaluateBoundaries(const QString &text, bool bundleCommon
 void TransliterationEngine::evaluateBoundariesAndInsertText(QTextCursor &cursor,
                                                             const QString &text) const
 {
-    const QTextCharFormat givenFormat = cursor.charFormat();
-    const int givenPosition = cursor.position();
-
+    const int beginPosition = cursor.position();
     cursor.insertText(text);
-    cursor.setPosition(qMax(givenPosition, 0));
+    const int endPosition = cursor.position();
 
-    auto applyFormatChanges = [this](QTextCursor &cursor, QChar::Script script) {
-        if (cursor.hasSelection()) {
-            TransliterationEngine::Language language = this->languageForScript(script);
-            const QFont font = this->languageFont(language);
+    const QList<TransliterationEngine::Boundary> items = this->evaluateBoundaries(text);
+    for (const TransliterationEngine::Boundary &item : items) {
+        if (item.isEmpty())
+            continue;
 
-            QTextCharFormat format;
-            format.setFontFamily(font.family());
-            // format.setForeground(script == QChar::Script_Latin ? Qt::black : Qt::red);
-            cursor.mergeCharFormat(format);
-            cursor.clearSelection();
-        }
-    };
+        cursor.setPosition(beginPosition + item.start);
+        cursor.setPosition(beginPosition + item.end, QTextCursor::KeepAnchor);
 
-    auto isEnglishChar = [](const QChar &ch) {
-        return ch.isSpace() || ch.isDigit() || ch.isPunct()
-                || ch.category() == QChar::Separator_Line || ch.script() == QChar::Script_Latin;
-    };
-
-    QChar::Script script = QChar::Script_Unknown;
-
-    while (!cursor.atBlockEnd()) {
-        const int index = cursor.position() - givenPosition;
-        const QChar ch = text.at(index);
-        const QChar::Script chScript = isEnglishChar(ch) ? QChar::Script_Latin : ch.script();
-        if (script != chScript) {
-            applyFormatChanges(cursor, script);
-            script = chScript;
-        }
-
-        cursor.movePosition(QTextCursor::NextCharacter, QTextCursor::KeepAnchor);
+        QTextCharFormat format;
+        format.setFontFamily(item.font.family());
+        cursor.mergeCharFormat(format);
+        cursor.clearSelection();
     }
 
-    applyFormatChanges(cursor, script);
+    cursor.setPosition(endPosition);
+}
+
+QChar::Script TransliterationEngine::determineScript(const QString &val)
+{
+    for (int i = 0; i < val.length(); i++) {
+        const QChar ch = val.at(i);
+        if (ch.script() == QChar::Script_Common || ch.script() == QChar::Script_Inherited)
+            continue;
+        return ch.script();
+    }
+
+    return QChar::Script_Latin;
 }
 
 QString TransliterationEngine::formattedHtmlOf(const QString &text) const
@@ -858,7 +907,46 @@ QString TransliterationEngine::formattedHtmlOf(const QString &text) const
             ts << "<font family=\"" << item.font.family() << "\">" << item.string << "</font>";
     }
 
+    ts.flush();
+
+    Application::log(html);
+
     return html;
+}
+
+///////////////////////////////////////////////////////////////////////////////
+
+FontSyntaxHighlighter::FontSyntaxHighlighter(QObject *parent) : QSyntaxHighlighter(parent)
+{
+    connect(TransliterationEngine::instance(),
+            &TransliterationEngine::preferredFontFamilyForLanguageChanged, this,
+            &FontSyntaxHighlighter::rehighlight);
+}
+
+FontSyntaxHighlighter::~FontSyntaxHighlighter() { }
+
+void FontSyntaxHighlighter::highlightBlock(const QString &text)
+{
+    const QTextDocument *doc = this->document();
+    const QFont defaultFont = doc->defaultFont();
+    const QTextBlock block = this->QSyntaxHighlighter::currentBlock();
+
+    QTextCharFormat defaultFormat;
+    defaultFormat.setFont(defaultFont);
+    this->setFormat(0, block.length(), defaultFormat);
+
+    // Per-language fonts.
+    const QList<TransliterationEngine::Boundary> boundaries =
+            TransliterationEngine::instance()->evaluateBoundaries(text);
+
+    for (const TransliterationEngine::Boundary &boundary : boundaries) {
+        if (boundary.isEmpty() || boundary.language == TransliterationEngine::English)
+            continue;
+
+        QTextCharFormat format = this->QSyntaxHighlighter::format(boundary.start);
+        format.setFontFamily(boundary.font.family());
+        this->setFormat(boundary.start, boundary.end - boundary.start + 1, format);
+    }
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -903,6 +991,8 @@ void Transliterator::setTextDocument(QQuickTextDocument *val)
 
         this->setCursorPosition(-1);
         this->setHasActiveFocus(false);
+        if (!m_fontHighlighter.isNull())
+            m_fontHighlighter->setDocument(nullptr);
     }
 
     m_textDocument = val;
@@ -914,6 +1004,8 @@ void Transliterator::setTextDocument(QQuickTextDocument *val)
             doc->setUndoRedoEnabled(m_textDocumentUndoRedoEnabled);
             connect(doc, &QTextDocument::contentsChange, this,
                     &Transliterator::processTransliteration);
+            if (!m_fontHighlighter.isNull())
+                m_fontHighlighter->setDocument(doc);
         }
     }
 
@@ -959,6 +1051,25 @@ void Transliterator::setHasActiveFocus(bool val)
     }
 
     emit hasActiveFocusChanged();
+}
+
+void Transliterator::setApplyLanguageFonts(bool val)
+{
+    if (m_applyLanguageFonts == val)
+        return;
+
+    m_applyLanguageFonts = val;
+
+    if (m_applyLanguageFonts) {
+        if (m_fontHighlighter.isNull())
+            m_fontHighlighter = new FontSyntaxHighlighter(this);
+        m_fontHighlighter->setDocument(this->document());
+    } else {
+        m_fontHighlighter->setDocument(nullptr);
+        delete m_fontHighlighter;
+    }
+
+    emit applyLanguageFontsChanged();
 }
 
 void Transliterator::setTransliterateCurrentWordOnly(bool val)

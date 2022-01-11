@@ -408,11 +408,15 @@ void ScriteDocument::setLocked(bool val)
 
 bool ScriteDocument::isEmpty() const
 {
+    const bool spIsEmpty = m_screenplay->isEmpty();
+
     const int objectCount = m_structure->elementCount() + m_structure->annotationCount()
             + m_screenplay->elementCount() + m_structure->notes()->noteCount()
             + m_structure->characterCount() + m_structure->attachments()->attachmentCount()
-            + m_collaborators.size();
-    const bool ret = objectCount == 0 && m_screenplay->isEmpty();
+            + m_collaborators.size() - (spIsEmpty ? 2 : 0);
+
+    const bool ret = objectCount <= 0 && m_screenplay->isEmpty();
+
     return ret;
 }
 
@@ -745,6 +749,8 @@ void ScriteDocument::reset()
 {
     HourGlass hourGlass;
 
+    emit aboutToReset();
+
     m_connectors.clear();
 
     if (m_structure != nullptr) {
@@ -773,6 +779,8 @@ void ScriteDocument::reset()
                    &ScriteDocument::evaluateStructureElementSequenceLater);
         disconnect(m_screenplay, &Screenplay::elementRemoved, this,
                    &ScriteDocument::screenplayElementRemoved);
+        disconnect(m_screenplay, &Screenplay::elementMoved, this,
+                   &ScriteDocument::screenplayElementMoved);
         disconnect(m_screenplay, &Screenplay::emptyChanged, this, &ScriteDocument::emptyChanged);
         disconnect(m_screenplay, &Screenplay::elementCountChanged, this,
                    &ScriteDocument::emptyChanged);
@@ -837,6 +845,7 @@ void ScriteDocument::reset()
             &ScriteDocument::evaluateStructureElementSequenceLater);
     connect(m_screenplay, &Screenplay::elementRemoved, this,
             &ScriteDocument::screenplayElementRemoved);
+    connect(m_screenplay, &Screenplay::elementMoved, this, &ScriteDocument::screenplayElementMoved);
     connect(m_screenplay, &Screenplay::emptyChanged, this, &ScriteDocument::emptyChanged);
     connect(m_screenplay, &Screenplay::elementCountChanged, this, &ScriteDocument::emptyChanged);
 
@@ -1942,6 +1951,18 @@ void ScriteDocument::screenplayElementRemoved(ScreenplayElement *ptr, int)
             StructureElement *element = m_structure->elementAt(index);
             element->setStackId(QString());
         }
+    }
+}
+
+void ScriteDocument::screenplayElementMoved(ScreenplayElement *ptr, int from, int to)
+{
+    Q_UNUSED(from);
+    Q_UNUSED(to);
+
+    const int index = m_structure->indexOfScene(ptr->scene());
+    if (index >= 0) {
+        StructureElement *element = m_structure->elementAt(index);
+        element->setStackId(QString());
     }
 }
 

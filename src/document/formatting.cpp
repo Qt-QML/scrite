@@ -30,6 +30,7 @@
 #include <QClipboard>
 #include <QMimeData>
 #include <QJsonDocument>
+#include <QTextBoundaryFinder>
 
 struct ParagraphMetrics
 {
@@ -1112,7 +1113,7 @@ public:
     void resetFormat() { m_formatMTime = -1; }
     bool shouldUpdateFromFormat(const SceneElementFormat *format)
     {
-        return format->isModified(&m_formatMTime) || m_highlightedText.isEmpty();
+        return format->isModified(&m_formatMTime);
     }
 
     void initializeSpellCheck(SceneDocumentBinder *binder);
@@ -1131,37 +1132,16 @@ public:
             return m_spellCheck->misspelledFragments();
         return QList<TextFragment>();
     }
-    void setHadMisspelledFragments(bool val) { m_hadMisspelledFragments = val; }
-    bool hadMisspelledFragments() const { return m_hadMisspelledFragments; }
 
-    // By keeping track of text that we have already highlighted, we can
-    // simply highlight the delta-text in a highlightBlock() call.
-    void setHighlightedText(const QString &text) { m_highlightedText = text; }
-    QString highlightedText() const { return m_highlightedText; }
-
-    void setTransliteratedSegment(int start, int end, TransliterationEngine::Language language)
+    TextFragment findMisspelledFragment(int start, int end) const
     {
-        m_transliterationStart = start;
-        m_transliterationEnd = end;
-        m_translitrationLanguage = language;
-    }
-    QPair<int, int> transliteratedSegment()
-    {
-        const QPair<int, int> ret = qMakePair(m_transliterationStart, m_transliterationEnd);
-        m_transliterationStart = -1;
-        m_transliterationEnd = -1;
-        return ret;
-    }
-    TransliterationEngine::Language transliterationLanguage()
-    {
-        TransliterationEngine::Language ret = m_translitrationLanguage;
-        m_translitrationLanguage = TransliterationEngine::English;
-        return ret;
-    }
-    bool hasTransliteratedSegment() const
-    {
-        return m_transliterationEnd >= 0 && m_transliterationStart >= 0
-                && m_transliterationEnd > m_transliterationStart;
+        const QList<TextFragment> fragments = this->misspelledFragments();
+        for (const TextFragment &fragment : fragments) {
+            if ((fragment.start() >= start && fragment.start() < end)
+                || (fragment.end() > start && fragment.end() <= end))
+                return fragment;
+        }
+        return TextFragment();
     }
 
     static SceneDocumentBlockUserData *get(const QTextBlock &block);
@@ -1173,10 +1153,6 @@ private:
     QString m_highlightedText;
     int m_formatMTime = -1;
     int m_spellCheckMTime = -1;
-    int m_transliterationEnd = 0;
-    int m_transliterationStart = 0;
-    bool m_hadMisspelledFragments = false;
-    TransliterationEngine::Language m_translitrationLanguage = TransliterationEngine::English;
     QMetaObject::Connection m_spellCheckConnection;
 };
 
@@ -1230,6 +1206,41 @@ SceneDocumentBlockUserData *SceneDocumentBlockUserData::get(QTextBlockUserData *
             reinterpret_cast<SceneDocumentBlockUserData *>(userData);
     return userData2;
 }
+
+class SpellCheckCursor : public QTextCursor
+{
+public:
+    SpellCheckCursor(QTextDocument *document, int position) : QTextCursor(document)
+    {
+        this->setPosition(position);
+        this->select(QTextCursor::WordUnderCursor);
+
+        m_blockData = SceneDocumentBlockUserData::get(this->block());
+        if (m_blockData != nullptr)
+            m_misspelledFragment = m_blockData->findMisspelledFragment(this->selectionStart(),
+                                                                       this->selectionEnd());
+    }
+    ~SpellCheckCursor() { }
+
+    QString word() const { return this->selectedText(); }
+    bool isMisspelled() const { return m_misspelledFragment.isValid(); }
+    QStringList suggestions() const { return m_misspelledFragment.suggestions(); }
+
+    void replace(const QString &word)
+    {
+        if (this->word().isEmpty())
+            return;
+
+        this->removeSelectedText();
+        this->insertText(word);
+    }
+
+    void resetCharFormat() { this->replace(this->word()); }
+
+private:
+    SceneDocumentBlockUserData *m_blockData = nullptr;
+    TextFragment m_misspelledFragment;
+};
 
 SceneDocumentBinder::SceneDocumentBinder(QObject *parent)
     : QSyntaxHighlighter(parent),
@@ -1305,7 +1316,6 @@ void SceneDocumentBinder::setTextDocument(QQuickTextDocument *val)
 
     if (this->document() != nullptr) {
         this->document()->setUndoRedoEnabled(true);
-        this->document()->removeEventFilter(this);
 
         disconnect(this->document(), &QTextDocument::contentsChange, this,
                    &SceneDocumentBinder::onContentsChange);
@@ -1335,7 +1345,6 @@ void SceneDocumentBinder::setTextDocument(QQuickTextDocument *val)
 
     if (m_textDocument != nullptr) {
         this->document()->setUndoRedoEnabled(false);
-        this->document()->installEventFilter(this);
 
         connect(this->document(), &QTextDocument::contentsChange, this,
                 &SceneDocumentBinder::onContentsChange, Qt::UniqueConnection);
@@ -1422,8 +1431,7 @@ void SceneDocumentBinder::setCursorPosition(int val)
         return;
     }
 
-    QTextCursor cursor(this->document());
-    cursor.setPosition(val);
+    SpellCheckCursor cursor(this->document(), val);
 
     QTextBlock block = cursor.block();
     if (!block.isValid()) {
@@ -1450,8 +1458,9 @@ void SceneDocumentBinder::setCursorPosition(int val)
             this->setCompletionPrefix(block.text());
 
         const QTextCharFormat format = cursor.charFormat();
-        this->setWordUnderCursorIsMisspelled(format.property(IsWordMisspelledProperty).toBool());
-        this->setSpellingSuggestions(format.property(WordSuggestionsProperty).toStringList());
+        this->setWordUnderCursorIsMisspelled(cursor.isMisspelled());
+        this->setSpellingSuggestions(cursor.suggestions());
+
         m_textFormat->updateFromFormat(format);
     }
 
@@ -1475,6 +1484,17 @@ void SceneDocumentBinder::setForceSyncDocument(bool val)
 
     m_forceSyncDocument = val;
     emit forceSyncDocumentChanged();
+}
+
+void SceneDocumentBinder::setApplyLanguageFonts(bool val)
+{
+    if (m_applyLanguageFonts == val)
+        return;
+
+    m_applyLanguageFonts = val;
+    emit applyLanguageFontsChanged();
+
+    this->refresh();
 }
 
 QString SceneDocumentBinder::nextTabFormatAsString() const
@@ -1603,52 +1623,6 @@ void SceneDocumentBinder::reload()
 {
     this->initializeDocument();
 }
-
-class SpellCheckCursor : public QTextCursor
-{
-public:
-    SpellCheckCursor(QTextDocument *document, int position) : QTextCursor(document)
-    {
-        this->setPosition(position);
-        this->select(QTextCursor::WordUnderCursor);
-    }
-    ~SpellCheckCursor() { }
-
-    QString word() const { return this->selectedText(); }
-
-    bool isMisspelled() const
-    {
-        return this->charFormatProperty(IsWordMisspelledProperty).toBool();
-    }
-    QStringList suggestions() const
-    {
-        return this->charFormatProperty(WordSuggestionsProperty).toStringList();
-    }
-    QVariant charFormatProperty(int prop) const
-    {
-        if (this->word().isEmpty())
-            return QVariant();
-
-        const QTextCharFormat format = this->charFormat();
-        return format.property(prop);
-    }
-
-    void replace(const QString &word)
-    {
-        if (this->word().isEmpty())
-            return;
-
-        QTextCharFormat format;
-        format.setBackground(Qt::NoBrush);
-        format.setProperty(IsWordMisspelledProperty, false);
-        format.setProperty(WordSuggestionsProperty, QStringList());
-        this->mergeCharFormat(format);
-        this->removeSelectedText();
-        this->insertText(word);
-    }
-
-    void resetCharFormat() { this->replace(this->word()); }
-};
 
 QStringList SceneDocumentBinder::spellingSuggestionsForWordAt(int position) const
 {
@@ -1833,12 +1807,17 @@ int SceneDocumentBinder::paste(int fromPosition)
 
         if (pasteFormatting) {
             SceneDocumentBlockUserData *userData = SceneDocumentBlockUserData::get(cursor.block());
-            if (userData)
+            if (userData) {
                 userData->sceneElement()->setType(SceneElement::Type(type));
+                userData->resetFormat();
+            }
         }
     }
 
-    return cursor.position();
+    const int ret = cursor.position();
+    this->refresh();
+
+    return ret;
 }
 
 void SceneDocumentBinder::setApplyFormattingEvenInTransaction(bool val)
@@ -1884,162 +1863,61 @@ void SceneDocumentBinder::highlightBlock(const QString &text)
         return;
     }
 
-    QTextCursor cursor(block);
-
-    /**
-     * This can happen if the element type was changed or the existing format was updated,
-     * via the Settings dialogue for example.
-     */
+    // Basic formatting
     const SceneElementFormat *format = m_screenplayFormat->elementFormat(element->type());
-    const bool updateFromFormat = userData->shouldUpdateFromFormat(format);
-    if (updateFromFormat) {
+    if (userData->shouldUpdateFromFormat(format)) {
         userData->blockFormat = format->createBlockFormat();
         userData->charFormat = format->createCharFormat();
-        userData->charFormat.setFontPointSize(format->font().pointSize()
-                                              + m_screenplayFormat->fontPointSizeDelta());
 
-        cursor.setPosition(block.position());
-        cursor.movePosition(QTextCursor::EndOfBlock, QTextCursor::KeepAnchor);
-        cursor.setCharFormat(userData->charFormat);
+        QTextCursor cursor(block);
         cursor.setBlockFormat(userData->blockFormat);
-        cursor.clearSelection();
-        cursor.setPosition(block.position());
     }
 
-    /**
-     * Now, we apply formatting for misspelled words.
-     */
+    this->setFormat(0, block.length(), userData->charFormat);
+
+    // Per-language fonts.
+    if (m_applyLanguageFonts) {
+        const QList<TransliterationEngine::Boundary> boundaries =
+                TransliterationEngine::instance()->evaluateBoundaries(text);
+
+        for (const TransliterationEngine::Boundary &boundary : boundaries) {
+            if (boundary.isEmpty() || boundary.language == TransliterationEngine::English)
+                continue;
+
+            QTextCharFormat format = this->format(boundary.start);
+            format.setFontFamily(boundary.font.family());
+            this->setFormat(boundary.start, boundary.end - boundary.start + 1, format);
+        }
+
+        if (m_currentElement == element)
+            emit currentFontChanged();
+    }
+
+    // Spelling mistakes.
     const QList<TextFragment> fragments = userData->misspelledFragments();
-    if (!fragments.isEmpty() || userData->hadMisspelledFragments()) {
-        userData->setHadMisspelledFragments(!fragments.isEmpty());
-
-        // First remove any formatting for previously misspelled words, but perhaps now corrected.
-        QTextCharFormat noSpellingErrorFormat;
-        noSpellingErrorFormat.setBackground(userData->blockFormat.background());
-        noSpellingErrorFormat.setProperty(IsWordMisspelledProperty, false);
-        cursor.setPosition(block.position());
-        cursor.movePosition(QTextCursor::EndOfBlock, QTextCursor::KeepAnchor);
-        cursor.mergeCharFormat(noSpellingErrorFormat);
-        cursor.clearSelection();
-        cursor.setPosition(block.position());
-
-        /**
-         * https://bugreports.qt.io/browse/QTBUG-39617
-         *
-         * There is a long and pending bug report in Qt that impacts our ability to show
-         * wavy-underline for spelling mistakes in TextArea QML elements. So the following lines of
-         * code would not provide us with a red-wavy-underline as expected.
-         *
-         * spellingErrorFormat.setFontUnderline(true);
-         * spellingErrorFormat.setUnderlineColor(Qt::red);
-         * spellingErrorFormat.setUnderlineStyle(QTextCharFormat::SpellCheckUnderline);
-         *
-         * Until we can see a fix from Qt, we will have to make do with semi-transparent red
-         * background color to highlight spelling mistakes.
-         */
-        QTextCharFormat spellingErrorFormat;
-        spellingErrorFormat.setBackground(QColor(255, 0, 0, 32));
-        spellingErrorFormat.setProperty(IsWordMisspelledProperty, true);
-
+    if (!fragments.isEmpty()) {
         for (const TextFragment &fragment : fragments) {
             if (!fragment.isValid())
                 continue;
 
-            spellingErrorFormat.setProperty(WordSuggestionsProperty, fragment.suggestions());
+            const QString word = text.mid(fragment.start(), fragment.length());
+            const QChar::Script script = TransliterationEngine::determineScript(word);
+            if (script != QChar::Script_Latin)
+                continue;
 
-            if (fragment.length() > 0) {
-                cursor.setPosition(block.position() + fragment.start());
-                cursor.setPosition(block.position() + fragment.end() + 1, QTextCursor::KeepAnchor);
-                cursor.mergeCharFormat(spellingErrorFormat);
-            }
-
-            cursor.clearSelection();
+            QTextCharFormat spellingErrorFormat = this->format(fragment.start());
+#if 0
+            spellingErrorFormat.setUnderlineStyle(QTextCharFormat::SpellCheckUnderline);
+            spellingErrorFormat.setUnderlineColor(Qt::red);
+            spellingErrorFormat.setFontUnderline(true);
+#else
+            spellingErrorFormat.setBackground(QColor(255, 0, 0, 32));
+#endif
+            this->setFormat(fragment.start(), fragment.length(), spellingErrorFormat);
         }
 
         emit spellingMistakesDetected();
     }
-
-    /**
-     * Here we apply font different languages.
-     */
-    if (userData->hasTransliteratedSegment() && !updateFromFormat) {
-        const QPair<int, int> range = userData->transliteratedSegment();
-        TransliterationEngine::Language language = userData->transliterationLanguage();
-        const QFont font = TransliterationEngine::instance()->languageFont(language);
-
-        cursor.setPosition(range.first + block.position());
-        cursor.setPosition(range.second + block.position(), QTextCursor::KeepAnchor);
-        QTextCharFormat format;
-        format.setFontFamily(font.family());
-        cursor.mergeCharFormat(format);
-        cursor.clearSelection();
-
-        if (m_currentElement == element)
-            emit currentFontChanged();
-
-        return;
-    }
-
-    /**
-      We update the formatting for the newly added characters or for the entire block,
-      depending on whether the block is being edited by the user presently or not.
-      */
-    auto applyFormatChanges = [](QTextCursor &cursor, QChar::Script script) {
-        if (cursor.hasSelection()) {
-            TransliterationEngine::Language language =
-                    TransliterationEngine::languageForScript(script);
-            const QFont font = TransliterationEngine::instance()->languageFont(language);
-            if (cursor.charFormat().fontFamily() != font.family()) {
-                QTextCharFormat format;
-                format.setFontFamily(font.family());
-                cursor.mergeCharFormat(format);
-            }
-            cursor.clearSelection();
-        }
-    };
-
-    auto isEnglishChar = [](const QChar &ch) {
-        return ch.isSpace() || ch.isDigit() || ch.isPunct()
-                || ch.category() == QChar::Separator_Line || ch.script() == QChar::Script_Latin;
-    };
-
-    const int charsAdded = updateFromFormat
-            ? text.length()
-            : (m_cursorPosition >= 0 ? qMax(text.length() - userData->highlightedText().length(), 0)
-                                     : 0);
-    const int charsRemoved = updateFromFormat
-            ? 0
-            : (m_cursorPosition >= 0 ? qMax(userData->highlightedText().length() - text.length(), 0)
-                                     : 0);
-    const int cursorPositon = updateFromFormat
-            ? 0
-            : (m_cursorPosition >= 0 ? qMax(m_cursorPosition - block.position(), 0) : 0);
-    const int from =
-            charsAdded > 0 ? qMax(cursorPositon - 1, 0) : (charsRemoved > 0 ? cursorPositon : 0);
-
-    userData->setHighlightedText(text);
-    cursor.setPosition(block.position() + from);
-
-    QChar::Script script = QChar::Script_Unknown;
-    while (!cursor.atBlockEnd()) {
-        const int index = cursor.position() - block.position();
-        const QChar ch = index < 0 || index >= text.length() ? QChar() : text.at(index);
-        if (ch.isNull())
-            break;
-
-        const QChar::Script chScript = isEnglishChar(ch) ? QChar::Script_Latin : ch.script();
-        if (script != chScript) {
-            applyFormatChanges(cursor, script);
-            script = chScript;
-        }
-
-        cursor.movePosition(QTextCursor::NextCharacter, QTextCursor::KeepAnchor);
-    }
-
-    applyFormatChanges(cursor, script);
-
-    if (m_currentElement == element)
-        emit currentFontChanged();
 }
 
 void SceneDocumentBinder::timerEvent(QTimerEvent *te)
@@ -2360,8 +2238,6 @@ void SceneDocumentBinder::onContentsChange(int from, int charsRemoved, int chars
         return;
     }
 
-    sceneElement->setLastContentChange(SceneElementContentChange());
-
     /**
       If the number of paragraphs in the document is differnet from the number of
       paragraphs in our internal Scene data structure, then we better sync it once.
@@ -2374,12 +2250,8 @@ void SceneDocumentBinder::onContentsChange(int from, int charsRemoved, int chars
         return;
     }
 
-    const int blockPosition = from - block.position();
-    const QString changedText =
-            charsAdded > 0 ? block.text().mid(blockPosition, charsAdded) : QString();
-    sceneElement->setLastContentChange(
-            SceneElementContentChange(blockPosition, charsAdded, charsRemoved, changedText));
     sceneElement->setText(block.text());
+
     if (m_spellCheckEnabled && m_liveSpellCheckEnabled && (charsAdded > 0 || charsRemoved > 0))
         userData->scheduleSpellCheckUpdate();
 }
@@ -2464,34 +2336,6 @@ void SceneDocumentBinder::syncSceneFromDocument(int nrBlocks)
 
     m_scene->setElementsList(elementList);
     m_scene->endUndoCapture();
-}
-
-bool SceneDocumentBinder::eventFilter(QObject *object, QEvent *event)
-{
-    if (object == this->document() && event->type() == TransliterationEvent::EventType()) {
-        TransliterationEvent *te = static_cast<TransliterationEvent *>(event);
-
-        QTextCursor cursor(this->document());
-        cursor.setPosition(te->start());
-
-        QTextBlock block = cursor.block();
-        SceneDocumentBlockUserData *userData = SceneDocumentBlockUserData::get(block);
-        if (userData) {
-            const int start = te->start() - block.position();
-            const int end = te->end() - block.position();
-            userData->setTransliteratedSegment(start, end, te->language());
-            cursor.movePosition(QTextCursor::End);
-            if (qAbs(cursor.position() - te->end()) > 2)
-                this->refresh();
-            else
-                this->rehighlightBlock(block);
-            emit requestCursorPosition(te->end() + 1);
-        }
-
-        return true;
-    }
-
-    return false;
 }
 
 void SceneDocumentBinder::evaluateAutoCompleteHints()

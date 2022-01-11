@@ -24,7 +24,6 @@ Item {
     property var selectedExtension
     property string filePathPrefix: "File will be saved as: "
     property alias nameFilters: folderPathDialog.nameFilters
-    property url folder
     property TabSequenceManager tabSequenceManager
 
     width: 400
@@ -44,9 +43,9 @@ Item {
         folder: {
             if(fileInfo.absolutePath !== "") {
                 if(fileInfo.exists)
-                    return "file:///" + fileInfo.absolutePath
+                    return Scrite.app.localFileToUrl(fileInfo.absolutePath)
             }
-            return fileSelector.folder
+            return Scrite.app.localFileToUrl(StandardPaths.writableLocation(StandardPaths.DownloadFolder))
         }
         onFolderChanged: fileSelector.folder = folder
         selectFolder: true
@@ -68,6 +67,8 @@ Item {
             lineHeightMode: Text.ProportionalHeight
             text: label + ":<br/><font size=\"-2\">(" + filePathPrefix + "<u>" + fileInfo.absoluteFilePath + "</u>. <a href=\"change\">Change path</a>.)</font>"
             font.pointSize: Scrite.app.idealFontPointSize
+            visible: selectedExtension.value !== AbstractReportGenerator.AdobePDF
+            enabled: visible
 
             MouseArea {
                 anchors.fill: parent
@@ -87,6 +88,8 @@ Item {
             font.pointSize: Scrite.app.idealFontPointSize
             onTextChanged: fileInfo.baseName = text
             TabSequenceItem.manager: tabSequenceManager
+            visible: selectedExtension.value !== AbstractReportGenerator.AdobePDF
+            enabled: visible
         }
 
         Row {

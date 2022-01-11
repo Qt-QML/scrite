@@ -26,6 +26,7 @@
 #include <QJsonObject>
 #include <QFontDatabase>
 #include <QQuickPaintedItem>
+#include <QSyntaxHighlighter>
 
 #include "qobjectproperty.h"
 
@@ -76,14 +77,14 @@ public:
     Q_PROPERTY(QFont font READ font NOTIFY languageChanged)
     QFont font() const { return this->languageFont(m_language); }
 
-    Q_INVOKABLE QString shortcutLetter(Language val) const;
+    Q_INVOKABLE QString shortcutLetter(TransliterationEngine::Language val) const;
 
-    Q_INVOKABLE QJsonObject alphabetMappingsFor(Language val) const;
+    Q_INVOKABLE QJsonObject alphabetMappingsFor(TransliterationEngine::Language val) const;
 
     Q_INVOKABLE void cycleLanguage();
 
-    Q_INVOKABLE void markLanguage(Language language, bool active);
-    Q_INVOKABLE bool queryLanguage(Language language) const;
+    Q_INVOKABLE void markLanguage(TransliterationEngine::Language language, bool active);
+    Q_INVOKABLE bool queryLanguage(TransliterationEngine::Language language) const;
     QMap<Language, bool> activeLanguages() const { return m_activeLanguages; }
 
     Q_PROPERTY(QJsonArray languages READ languages NOTIFY languagesChanged)
@@ -93,11 +94,13 @@ public:
     Q_INVOKABLE QJsonArray getLanguages() const { return this->languages(); }
 
     void *transliterator() const;
-    static void *transliteratorFor(Language language);
+    static void *transliteratorFor(TransliterationEngine::Language language);
     static Language languageOf(void *transliterator);
 
-    Q_INVOKABLE void setTextInputSourceIdForLanguage(Language language, const QString &id);
-    Q_INVOKABLE QString textInputSourceIdForLanguage(Language language) const;
+    Q_INVOKABLE void setTextInputSourceIdForLanguage(TransliterationEngine::Language language,
+                                                     const QString &id);
+    Q_INVOKABLE QString
+    textInputSourceIdForLanguage(TransliterationEngine::Language language) const;
 
     Q_PROPERTY(QJsonObject languageTextInputSourceMap READ languageTextInputSourceMap NOTIFY languageTextInputSourceMapChanged)
     QJsonObject languageTextInputSourceMap() const;
@@ -106,29 +109,32 @@ public:
     Q_INVOKABLE QString transliteratedWord(const QString &word) const;
     Q_INVOKABLE QString transliteratedParagraph(const QString &paragraph,
                                                 bool includingLastWord = true) const;
-    Q_INVOKABLE QString transliteratedWordInLanguage(const QString &word, Language language) const;
+    Q_INVOKABLE QString transliteratedWordInLanguage(
+            const QString &word, TransliterationEngine::Language language) const;
 
     static QString transliteratedWord(const QString &word, void *transliterator);
     static QString transliteratedParagraph(const QString &paragraph, void *transliterator,
                                            bool includingLastWord = true);
 
-    Q_INVOKABLE QFont languageFont(Language language) const
+    Q_INVOKABLE QFont languageFont(TransliterationEngine::Language language) const
     {
         return this->languageFont(language, true);
     }
-    QFont languageFont(Language language, bool preferAppFonts) const;
-    QStringList languageFontFilePaths(Language language) const;
+    QFont languageFont(TransliterationEngine::Language language, bool preferAppFonts) const;
+    QStringList languageFontFilePaths(TransliterationEngine::Language language) const;
 
-    Q_INVOKABLE QJsonObject availableLanguageFontFamilies(Language language) const;
-    Q_INVOKABLE QString preferredFontFamilyForLanguage(Language language);
-    Q_INVOKABLE void setPreferredFontFamilyForLanguage(Language language,
+    Q_INVOKABLE QJsonObject
+    availableLanguageFontFamilies(TransliterationEngine::Language language) const;
+    Q_INVOKABLE QString preferredFontFamilyForLanguage(TransliterationEngine::Language language);
+    Q_INVOKABLE void setPreferredFontFamilyForLanguage(TransliterationEngine::Language language,
                                                        const QString &fontFamily);
-    Q_SIGNAL void preferredFontFamilyForLanguageChanged(Language language,
+    Q_SIGNAL void preferredFontFamilyForLanguageChanged(TransliterationEngine::Language language,
                                                         const QString &fontFamily);
 
     static Language languageForScript(QChar::Script script);
-    static QChar::Script scriptForLanguage(Language language);
-    static QFontDatabase::WritingSystem writingSystemForLanguage(Language language);
+    static QChar::Script scriptForLanguage(TransliterationEngine::Language language);
+    static QFontDatabase::WritingSystem
+    writingSystemForLanguage(TransliterationEngine::Language language);
 
     struct Boundary
     {
@@ -137,12 +143,15 @@ public:
         QFont font;
         QString string;
         TransliterationEngine::Language language = TransliterationEngine::English;
+        void evalStringLanguageAndFont(const QString &sourceText);
         void append(const QChar &ch, int pos);
         bool isEmpty() const;
     };
     QList<Boundary> evaluateBoundaries(const QString &text,
                                        bool bundleCommonScriptChars = false) const;
     void evaluateBoundariesAndInsertText(QTextCursor &cursor, const QString &text) const;
+
+    static QChar::Script determineScript(const QString &val);
 
     Q_INVOKABLE QString formattedHtmlOf(const QString &text) const;
 
@@ -158,6 +167,19 @@ private:
     QMap<Language, QString> m_languageFontFamily;
     QMap<Language, QStringList> m_languageFontFilePaths;
     mutable QMap<Language, QStringList> m_availableLanguageFontFamilies;
+};
+
+class FontSyntaxHighlighter : public QSyntaxHighlighter
+{
+    Q_OBJECT
+
+public:
+    FontSyntaxHighlighter(QObject *parent = nullptr);
+    ~FontSyntaxHighlighter();
+
+protected:
+    // QSyntaxHighlighter interface
+    void highlightBlock(const QString &text);
 };
 
 class Transliterator : public QObject
@@ -196,6 +218,11 @@ public:
     void setHasActiveFocus(bool val);
     bool hasActiveFocus() const { return m_hasActiveFocus; }
     Q_SIGNAL void hasActiveFocusChanged();
+
+    Q_PROPERTY(bool applyLanguageFonts READ isApplyLanguageFonts WRITE setApplyLanguageFonts NOTIFY applyLanguageFontsChanged)
+    void setApplyLanguageFonts(bool val);
+    bool isApplyLanguageFonts() const { return m_applyLanguageFonts; }
+    Q_SIGNAL void applyLanguageFontsChanged();
 
     Q_PROPERTY(bool transliterateCurrentWordOnly READ isTransliterateCurrentWordOnly WRITE setTransliterateCurrentWordOnly NOTIFY transliterateCurrentWordOnlyChanged)
     void setTransliterateCurrentWordOnly(bool val);
@@ -236,8 +263,10 @@ private:
     Mode m_mode = AutomaticMode;
     int m_cursorPosition = -1;
     bool m_hasActiveFocus = false;
+    bool m_applyLanguageFonts = false;
     bool m_transliterateCurrentWordOnly = true;
     bool m_textDocumentUndoRedoEnabled = false;
+    QPointer<FontSyntaxHighlighter> m_fontHighlighter;
     QObjectProperty<QQuickTextDocument> m_textDocument;
 };
 

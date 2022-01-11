@@ -188,7 +188,7 @@ Application::Application(int &argc, char **argv, const QVersionNumber &version)
 
 QVersionNumber Application::prepare()
 {
-    const QVersionNumber applicationVersion(0, 8, 2);
+    const QVersionNumber applicationVersion(0, 8, 4);
 
     if (qApp != nullptr)
         return applicationVersion;
@@ -847,8 +847,10 @@ bool Application::notify(QObject *object, QEvent *event)
         }
 
         if (ke->modifiers() == Qt::ControlModifier && ke->key() == Qt::Key_Z) {
-            if (!UndoHandler::handleUndo())
+            if (!UndoHandler::handleUndo()) {
+                Application::log("Got Undo Hit: " + QString::number(m_undoGroup->canUndo()));
                 m_undoGroup->undo();
+            }
             return true;
         }
 
@@ -1335,6 +1337,11 @@ QString Application::fileContents(const QString &fileName)
 QString Application::fileName(const QString &path)
 {
     return QFileInfo(path).baseName();
+}
+
+QString Application::filePath(const QString &fileName)
+{
+    return QFileInfo(fileName).absolutePath();
 }
 
 QString Application::neighbouringFilePath(const QString &filePath, const QString &nfileName)

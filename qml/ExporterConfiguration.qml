@@ -22,6 +22,7 @@ Item {
     id: configurationBox
     property AbstractExporter exporter
     property var formInfo: exporter ? exporter.configurationFormInfo() : {"title": "Unknown", "fields": []}
+    readonly property bool isPdfExport: exporter ? exporter.format === "Screenplay/Adobe PDF" : false
 
     width: 700
     height: {
@@ -87,7 +88,7 @@ Item {
                     Text {
                         font.pointSize: Screen.devicePixelRatio > 1 ? 24 : 20
                         font.bold: true
-                        text: exporter.formatName + " - Export"
+                        text: isPdfExport ? "Generate PDF" : (exporter.formatName + " - Export")
                         anchors.horizontalCenter: parent.horizontalCenter
                     }
 
@@ -98,8 +99,9 @@ Item {
                         absoluteFilePath: exporter.fileName
                         onAbsoluteFilePathChanged: exporter.fileName = absoluteFilePath
                         nameFilters: exporter.nameFilters
-                        folder: StandardPaths.writableLocation(StandardPaths.DownloadsFolder)
                         tabSequenceManager: tabSequence
+                        visible: !isPdfExport
+                        enabled: visible
                     }
 
                     Loader {
@@ -187,7 +189,7 @@ Item {
 
                 Button2 {
                     enabled: fileSelector.absoluteFilePath !== "" && exporter.featureEnabled
-                    text: "Export"
+                    text: isPdfExport ? "Generate" : "Export"
                     onClicked: busyOverlay.visible = true
                 }
             }
@@ -195,7 +197,7 @@ Item {
             BusyOverlay {
                 id: busyOverlay
                 anchors.fill: parent
-                busyMessage: "Exporting to \"" + exporter.fileName + "\" ..."
+                busyMessage: isPdfExport ? "Generating PDF ..." : "Exporting to \"" + exporter.fileName + "\" ..."
 
                 FileManager {
                     id: fileManager
@@ -205,7 +207,6 @@ Item {
                     if(visible) {
                         Scrite.app.execLater(busyOverlay, 100, function() {
                             const dlFileName = exporter.fileName
-                            const isPdfExport = exporter.format === "Screenplay/Adobe PDF"
                             if(isPdfExport)
                                 exporter.fileName = fileManager.generateUniqueTemporaryFileName("pdf")
 
