@@ -460,7 +460,7 @@ Item {
 
         QtObject {
             EventFilter.target: Scrite.app
-            EventFilter.active: screenplayElementList.multiSelectionMode
+            EventFilter.active: Scrite.document.screenplay.hasSelectedElements
             EventFilter.events: [EventFilter.KeyPress]
             EventFilter.onFilter: (object,event,result) => {
                                       if(event.key === Qt.Key_Escape) {
@@ -573,7 +573,7 @@ Item {
                 active: element !== null // && (isBreakElement || element.scene !== null)
                 enabled: !delegateDropArea.containsDrag
                 sourceComponent: Rectangle {
-                    color: element.scene ? Qt.tint(sceneColor, "#C0FFFFFF") : sceneColor
+                    color: element.scene ? Qt.tint(sceneColor, (element.selected || elementItemDelegate.active) ? "#9CFFFFFF" : "#C0FFFFFF") : sceneColor
                     border.color: color === Qt.rgba(1,1,1,1) ? "black" : sceneColor
                     border.width: elementItemDelegate.active ? 2 : 1
                     Behavior on border.width {
@@ -603,12 +603,12 @@ Item {
 
                         Text {
                             text: sceneTitle
-                            color: element.scene ? "black" : colorPalette.text
+                            color: element.scene ? Scrite.app.textColorFor(parent.parent.color) : colorPalette.text
                             elide: Text.ElideRight
                             width: parent.width
                             height: parent.height
                             wrapMode: Text.WrapAtWordBoundaryOrAnywhere
-                            font.bold: isBreakElement
+                            font.bold: isBreakElement || elementItemDelegate.active
                             lineHeight: 1.25
                             font.pointSize: 12
                             transformOrigin: Item.Center
@@ -665,7 +665,23 @@ Item {
                                 ToolTip.text = evalToolTipText()
                         }
                         acceptedButtons: Qt.LeftButton | Qt.RightButton
+                        onPressed: screenplayElementList.forceActiveFocus()
                         onClicked: {
+                            if(mouse.button === Qt.RightButton) {
+                                if(element.elementType === ScreenplayElement.BreakElementType) {
+                                    breakItemMenu.element = element
+                                    breakItemMenu.popup(this)
+                                } else {
+                                    elementItemMenu.element = element
+                                    elementItemMenu.popup(this)
+                                }
+
+                                Scrite.document.screenplay.currentElementIndex = index
+                                requestEditorLater()
+
+                                return
+                            }
+
                             const isControlPressed = mouse.modifiers & Qt.ControlModifier
                             const isShiftPressed = mouse.modifiers & Qt.ShiftModifier
                             screenplayElementList.forceActiveFocus()
@@ -687,18 +703,9 @@ Item {
                                 selectRange()
                             } else
                                 Scrite.document.screenplay.clearSelection()
+
                             Scrite.document.screenplay.currentElementIndex = index
                             requestEditorLater()
-
-                            if(mouse.button === Qt.RightButton) {
-                                if(element.elementType === ScreenplayElement.BreakElementType) {
-                                    breakItemMenu.element = element
-                                    breakItemMenu.popup(this)
-                                } else {
-                                    elementItemMenu.element = element
-                                    elementItemMenu.popup(this)
-                                }
-                            }
                         }
                     }
 
@@ -767,6 +774,10 @@ Item {
                             cursorShape: Qt.SizeAllCursor
                             enabled: enableDragDrop
                             onPressed: {
+                                if(!elementItemDelegate.element.selected)
+                                    Scrite.document.screenplay.clearSelection()
+                                elementItemDelegate.element.selected = true
+                                screenplayElementList.forceActiveFocus()
                                 elementItemDelegate.grabToImage(function(result) {
                                     elementItemDelegate.Drag.imageSource = result.url
                                 })
@@ -780,6 +791,7 @@ Item {
                 id: delegateDropArea
                 anchors.fill: parent
                 keys: [dropAreaKey]
+                enabled: !screenplayElement.selected
 
                 onEntered: (drag) => {
                                screenplayElementList.forceActiveFocus()
@@ -898,13 +910,33 @@ Item {
         id: elementItemMenu
         property ScreenplayElement element
 
-        onClosed: element = null
+        SceneGroup {
+            id: elementItemMenuSceneGroup
+            structure: Scrite.document.structure
+        }
+
+        onAboutToShow: {
+            if(element.selected) {
+                Scrite.document.screenplay.gatherSelectedScenes(elementItemMenuSceneGroup)
+            } else {
+                Scrite.document.screenplay.clearSelection()
+                element.selected = true
+                elementItemMenuSceneGroup.addScene(element.scene)
+            }
+        }
+
+        onClosed: {
+            element = null
+            elementItemMenuSceneGroup.clearScenes()
+        }
 
         ColorMenu {
             title: "Color"
-            enabled: elementItemMenu.element
+            enabled: !Scrite.document.readOnly && elementItemMenu.element
             onMenuItemClicked: {
-                elementItemMenu.element.scene.color = color
+                for(var i=0; i<elementItemMenuSceneGroup.sceneCount; i++) {
+                    elementItemMenuSceneGroup.sceneAt(i).color = color
+                }
                 elementItemMenu.close()
             }
         }
@@ -912,19 +944,18 @@ Item {
         MarkSceneAsMenu {
             title: "Mark Scene As"
             scene: elementItemMenu.element ? elementItemMenu.element.scene : null
-            onTriggered: elementItemMenu.close()
+            enabled: !Scrite.document.readOnly
+            onTriggered: {
+                for(var i=0; i<elementItemMenuSceneGroup.sceneCount; i++) {
+                    elementItemMenuSceneGroup.sceneAt(i).type = scene.type
+                }
+                elementItemMenu.close()
+            }
         }
 
         StructureGroupsMenu {
-            sceneGroup: SceneGroup {
-                structure: Scrite.document.structure
-            }
-            onAboutToShow: {
-                sceneGroup.clearScenes()
-                if(elementItemMenu.element)
-                    sceneGroup.addScene(elementItemMenu.element.scene)
-            }
-            onClosed: sceneGroup.clearScenes()
+            sceneGroup: elementItemMenuSceneGroup
+            enabled: !Scrite.document.readOnly
         }
 
         MenuSeparator { }
@@ -933,8 +964,50 @@ Item {
             text: "Remove"
             enabled: !Scrite.document.readOnly
             onClicked: {
-                Scrite.document.screenplay.removeElement(elementItemMenu.element)
+                if(elementItemMenuSceneGroup.sceneCount <= 1)
+                    Scrite.document.screenplay.removeElement(elementItemMenu.element)
+                else
+                    Scrite.document.screenplay.removeSelectedElements();
                 elementItemMenu.close()
+            }
+        }
+    }
+
+    SequentialAnimation {
+        id: dropSceneAnimation
+
+        property var dropSource // must be a QObject subclass
+        property int dropIndex
+
+        PauseAnimation { duration: 50 }
+
+        ScriptAction {
+            script: {
+                const source = dropSceneAnimation.dropSource
+                const index = dropSceneAnimation.dropIndex
+
+                dropSceneAnimation.dropSource = null
+                dropSceneAnimation.dropIndex = -2
+
+                var sourceType = Scrite.app.typeName(source)
+
+                if(sourceType === "ScreenplayElement") {
+                    Scrite.document.screenplay.moveSelectedElements(index)
+                    return
+                }
+
+                var sceneID = source.id
+                if(sceneID.length === 0)
+                    return
+
+                var scene = Scrite.document.structure.findElementBySceneID(sceneID)
+                if(scene === null)
+                    return
+
+                var element = screenplayElementComponent.createObject()
+                element.sceneID = sceneID
+                Scrite.document.screenplay.insertElementAt(element, index)
+                requestEditorLater()
             }
         }
     }
@@ -943,28 +1016,9 @@ Item {
         if(source === null)
             return
 
-        var sourceType = Scrite.app.typeName(source)
-
-        if(sourceType === "ScreenplayElement") {
-            if(screenplayElementList.mutiSelectionMode)
-                Scrite.document.screenplay.moveSelectedElements(index)
-            else
-                Scrite.document.screenplay.moveElement(source, index)
-            return
-        }
-
-        var sceneID = source.id
-        if(sceneID.length === 0)
-            return
-
-        var scene = Scrite.document.structure.findElementBySceneID(sceneID)
-        if(scene === null)
-            return
-
-        var element = screenplayElementComponent.createObject()
-        element.sceneID = sceneID
-        Scrite.document.screenplay.insertElementAt(element, index)
-        requestEditorLater()
+        dropSceneAnimation.dropSource = source
+        dropSceneAnimation.dropIndex = index
+        dropSceneAnimation.start()
     }
 
     Component {

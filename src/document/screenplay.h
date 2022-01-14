@@ -298,6 +298,10 @@ public:
     bool hasNonStandardScenes() const { return m_hasNonStandardScenes; }
     Q_SIGNAL void hasNonStandardScenesChanged();
 
+    Q_PROPERTY(bool hasSelectedElements READ hasSelectedElements NOTIFY hasSelectedElementsChanged)
+    bool hasSelectedElements() const;
+    Q_SIGNAL void hasSelectedElementsChanged();
+
     Q_PROPERTY(QQmlListProperty<ScreenplayElement> elements READ elements NOTIFY elementsChanged)
     QQmlListProperty<ScreenplayElement> elements();
     Q_INVOKABLE void addElement(ScreenplayElement *ptr);
@@ -318,8 +322,11 @@ public:
     Q_SIGNAL void elementInserted(ScreenplayElement *element, int index);
     Q_SIGNAL void elementRemoved(ScreenplayElement *element, int index);
     Q_SIGNAL void elementMoved(ScreenplayElement *element, int from, int to);
+    Q_SIGNAL void aboutToMoveElements(int at);
 
     Q_SIGNAL void elementSceneGroupsChanged(ScreenplayElement *ptr);
+
+    Q_INVOKABLE void gatherSelectedScenes(SceneGroup *into);
 
     Q_INVOKABLE ScreenplayElement *splitElement(ScreenplayElement *ptr, SceneElement *element,
                                                 int textPosition);
@@ -434,6 +441,8 @@ protected:
     void setSceneCount(int val);
     void setEpisodeCount(int val);
     void onDfsAuction(const QString &filePath, int *claims);
+    void connectToScreenplayElementSignals(ScreenplayElement *ptr);
+    void disconnectFromScreenplayElementSignals(ScreenplayElement *ptr);
 
 private:
     QString m_title;

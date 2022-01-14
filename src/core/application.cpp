@@ -188,7 +188,7 @@ Application::Application(int &argc, char **argv, const QVersionNumber &version)
 
 QVersionNumber Application::prepare()
 {
-    const QVersionNumber applicationVersion(0, 8, 4);
+    const QVersionNumber applicationVersion(0, 8, 6);
 
     if (qApp != nullptr)
         return applicationVersion;
@@ -847,10 +847,8 @@ bool Application::notify(QObject *object, QEvent *event)
         }
 
         if (ke->modifiers() == Qt::ControlModifier && ke->key() == Qt::Key_Z) {
-            if (!UndoHandler::handleUndo()) {
-                Application::log("Got Undo Hit: " + QString::number(m_undoGroup->canUndo()));
+            if (!UndoHandler::handleUndo())
                 m_undoGroup->undo();
-            }
             return true;
         }
 
@@ -1154,6 +1152,11 @@ inline qreal evaluateLuminance(const QColor &color)
 bool Application::isLightColor(const QColor &color)
 {
     return evaluateLuminance(color) > 0.5;
+}
+
+bool Application::isVeryLightColor(const QColor &color)
+{
+    return evaluateLuminance(color) > 0.8;
 }
 
 QColor Application::textColorFor(const QColor &bgColor)

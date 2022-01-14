@@ -1851,18 +1851,19 @@ Rectangle {
                         // Context menus must ideally show up directly below the cursor
                         // So, we keep the menu loaders inside the cursorOverlay
                         MenuLoader {
-                            id: spellingSuggestionsMenu
+                            id: spellingSuggestionsMenuLoader
                             anchors.bottom: parent.bottom
                             enabled: !Scrite.document.readOnly
 
                             function replace(cursorPosition, suggestion) {
                                 sceneDocumentBinder.replaceWordAt(cursorPosition, suggestion)
-                                sceneDocumentBinder.preserveScrollAndReload()
+                                // sceneDocumentBinder.preserveScrollAndReload()
                                 if(cursorPosition >= 0)
                                     sceneTextEditor.cursorPosition = cursorPosition
                             }
 
                             menu: Menu2 {
+                                id: spellingSuggestionsMenu
                                 property int cursorPosition: -1
                                 onAboutToShow: {
                                     cursorPosition = sceneTextEditor.cursorPosition
@@ -1881,10 +1882,8 @@ Rectangle {
                                         text: modelData
                                         focusPolicy: Qt.NoFocus
                                         onClicked: {
-                                            Qt.callLater(function() {
-                                                spellingSuggestionsMenu.replace(cursorPosition, modelData)
-                                            })
-                                            spellingSuggestionsMenu.close()
+                                            Qt.callLater(spellingSuggestionsMenuLoader.replace, spellingSuggestionsMenu.cursorPosition, modelData)
+                                            spellingSuggestionsMenuLoader.close()
                                         }
                                     }
                                 }
@@ -1895,7 +1894,7 @@ Rectangle {
                                     text: "Add to dictionary"
                                     focusPolicy: Qt.NoFocus
                                     onClicked: {
-                                        spellingSuggestionsMenu.close()
+                                        spellingSuggestionsMenuLoader.close()
                                         sceneDocumentBinder.addWordUnderCursorToDictionary()
                                         ++contentView.numberOfWordsAddedToDict
                                     }
@@ -1905,7 +1904,7 @@ Rectangle {
                                     text: "Ignore"
                                     focusPolicy: Qt.NoFocus
                                     onClicked: {
-                                        spellingSuggestionsMenu.close()
+                                        spellingSuggestionsMenuLoader.close()
                                         sceneDocumentBinder.addWordUnderCursorToIgnoreList()
                                         ++contentView.numberOfWordsAddedToDict
                                     }
@@ -2116,7 +2115,7 @@ Rectangle {
                             if(!sceneTextEditor.hasSelection && sceneDocumentBinder.spellCheckEnabled) {
                                 sceneTextEditor.cursorPosition = sceneTextEditor.positionAt(mouse.x, mouse.y)
                                 if(sceneDocumentBinder.wordUnderCursorIsMisspelled) {
-                                    spellingSuggestionsMenu.popup()
+                                    spellingSuggestionsMenuLoader.popup()
                                     return
                                 }
                             }
@@ -2126,7 +2125,7 @@ Rectangle {
                         DelayedPropertyBinder {
                             id: contextMenuEnableBinder
                             initial: false
-                            set: !editorContextMenu.active && !spellingSuggestionsMenu.active && sceneTextEditor.activeFocus
+                            set: !editorContextMenu.active && !spellingSuggestionsMenuLoader.active && sceneTextEditor.activeFocus
                             delay: 100
                         }
                     }
@@ -2346,7 +2345,7 @@ Rectangle {
                 anchors.left: parent.left
                 anchors.top: parent.top
                 anchors.bottom: parent.bottom
-                color: Qt.tint(contentItem.theScene.color, "#A7FFFFFF")
+                color: Scrite.app.isVeryLightColor(contentItem.theScene.color) ? primaryColors.highlight.background : Qt.tint(contentItem.theScene.color, "#9CFFFFFF")
                 visible: screenplayAdapter.currentIndex === contentItem.theIndex
             }
 
@@ -3019,6 +3018,19 @@ Rectangle {
                     }
                 }
 
+                QtObject {
+                    EventFilter.target: Scrite.app
+                    EventFilter.active: screenplayAdapter.isSourceScreenplay && Scrite.document.screenplay.hasSelectedElements
+                    EventFilter.events: [EventFilter.KeyPress]
+                    EventFilter.onFilter: (object,event,result) => {
+                                              if(event.key === Qt.Key_Escape) {
+                                                  Scrite.document.screenplay.clearSelection()
+                                                  result.acceptEvent = true
+                                                  result.filter = true
+                                              }
+                                          }
+                }
+
                 ListView {
                     id: sceneListView
                     anchors.fill: parent
@@ -3083,9 +3095,11 @@ Rectangle {
                         id: delegateItem
                         width: sceneListView.width-1
                         height: 40
-                        color: scene ? Qt.tint(scene.color, (screenplayElement.selected ? "#9CFFFFFF" : "#E7FFFFFF"))
+                        color: scene ? screenplayElement.selected ? selectedColor : normalColor
                                      : screenplayAdapter.currentIndex === index ? Scrite.app.translucent(accentColors.windowColor, 0.25) : Qt.rgba(0,0,0,0.01)
 
+                        property color selectedColor: Scrite.app.isVeryLightColor(scene.color) ? Qt.tint(primaryColors.highlight.background, "#9CFFFFFF") : Qt.tint(scene.color, "#9CFFFFFF")
+                        property color normalColor: Qt.tint(scene.color, "#E7FFFFFF")
                         property int elementIndex: index
                         property bool elementIsBreak: screenplayElementType === ScreenplayElement.BreakElementType
                         property bool elementIsEpisodeBreak: screenplayElementType === ScreenplayElement.BreakElementType && breakType === Screenplay.Episode
@@ -3200,6 +3214,8 @@ Rectangle {
                             "sceneListView/sceneID": screenplayElement.sceneID
                         }
                         Drag.onActiveChanged: {
+                            if(!screenplayElement.selected)
+                               Scrite.document.screenplay.clearSelection()
                             screenplayElement.selected = true
                             moveSelectedElementsAnimation.draggedElement = screenplayElement
                             if(screenplayElementType === ScreenplayElement.BreakElementType)
@@ -3211,6 +3227,7 @@ Rectangle {
                             id: delegateDropArea
                             anchors.fill: parent
                             keys: ["sceneListView/sceneID"]
+                            enabled: !screenplayElement.selected
 
                             onEntered: (drag) => {
                                            drag.acceptProposedAction()

@@ -17,6 +17,7 @@
 #include "aggregation.h"
 #include "errorreport.h"
 #include "application.h"
+#include "focustracker.h"
 #include "timeprofiler.h"
 #include "scritedocument.h"
 #include "garbagecollector.h"
@@ -29,13 +30,14 @@
 #include <QDateTime>
 #include <QJSEngine>
 #include <QClipboard>
+#include <QScopeGuard>
 #include <QQuickWindow>
 #include <QJsonDocument>
 #include <QStandardPaths>
+#include <QFutureWatcher>
 #include <QtConcurrentRun>
 #include <QFileSystemWatcher>
 #include <QScopedValueRollback>
-#include <QFutureWatcher>
 
 StructureElement::StructureElement(QObject *parent)
     : QObject(parent), m_structure(qobject_cast<Structure *>(parent)), m_follow(this, "follow")
@@ -98,10 +100,12 @@ void StructureElement::setX(qreal val)
     if (!m_placed)
         m_placed = !qFuzzyIsNull(m_x) && !qFuzzyIsNull(m_y);
 
-    ObjectPropertyInfo *info = ObjectPropertyInfo::get(this, "position");
-    QScopedPointer<PushObjectPropertyUndoCommand> cmd;
-    if (!info->isLocked())
-        cmd.reset(new PushObjectPropertyUndoCommand(this, info->property, m_placed));
+    if (m_undoRedoEnabled) {
+        ObjectPropertyInfo *info = ObjectPropertyInfo::get(this, "position");
+        QScopedPointer<PushObjectPropertyUndoCommand> cmd;
+        if (!info->isLocked())
+            cmd.reset(new PushObjectPropertyUndoCommand(this, info->property, m_placed));
+    }
 
     m_x = val;
     emit xChanged();
@@ -115,10 +119,12 @@ void StructureElement::setY(qreal val)
     if (!m_placed)
         m_placed = !qFuzzyIsNull(m_x) && !qFuzzyIsNull(m_y);
 
-    ObjectPropertyInfo *info = ObjectPropertyInfo::get(this, "position");
-    QScopedPointer<PushObjectPropertyUndoCommand> cmd;
-    if (!info->isLocked())
-        cmd.reset(new PushObjectPropertyUndoCommand(this, info->property, m_placed));
+    if (m_undoRedoEnabled) {
+        ObjectPropertyInfo *info = ObjectPropertyInfo::get(this, "position");
+        QScopedPointer<PushObjectPropertyUndoCommand> cmd;
+        if (!info->isLocked())
+            cmd.reset(new PushObjectPropertyUndoCommand(this, info->property, m_placed));
+    }
 
     m_y = val;
     emit yChanged();
@@ -177,6 +183,15 @@ void StructureElement::setFollow(QQuickItem *val)
         timer->deleteLater();
     });
     timer->start();
+}
+
+void StructureElement::setUndoRedoEnabled(bool val)
+{
+    if (m_undoRedoEnabled == val)
+        return;
+
+    m_undoRedoEnabled = val;
+    emit undoRedoEnabledChanged();
 }
 
 void StructureElement::setSyncWithFollow(bool val)
@@ -332,6 +347,29 @@ void StructureElement::setStackLeader(bool val)
     emit stackLeaderChanged();
 }
 
+void StructureElement::unstack()
+{
+    if (m_stackId.isEmpty())
+        return;
+
+    auto clearStackId = qScopeGuard([=] { this->setStackId(QString()); });
+    Q_UNUSED(clearStackId)
+
+    if (m_structure == nullptr)
+        return;
+
+    const StructureElementStack *stack = m_structure->elementStacks()->findStackById(m_stackId);
+    if (stack == nullptr)
+        return;
+
+    const int elementIndex = stack->constList().indexOf(this);
+    if (elementIndex == 0 || elementIndex == stack->constList().size() - 1)
+        return;
+
+    StructureElementStack::stackEm(stack->constList().mid(0, elementIndex));
+    StructureElementStack::stackEm(stack->constList().mid(elementIndex + 1));
+}
+
 void StructureElement::serializeToJson(QJsonObject &json) const
 {
     if (m_scene != nullptr && m_scene->heading() != nullptr && m_scene->heading()->isEnabled()
@@ -471,6 +509,42 @@ void StructureElementStack::bringElementToTop(int index)
     StructureElement *element = this->list().at(index);
     int elementIndex = structure->indexOfElement(element);
     structure->setCurrentElementIndex(elementIndex);
+}
+
+void StructureElementStack::sortByScreenplayOccurance(Screenplay *screenplay)
+{
+    QList<StructureElement *> &list = this->list();
+
+    bool shifted = false;
+    std::sort(list.begin(), list.end(),
+              [screenplay, &shifted](StructureElement *e1, StructureElement *e2) {
+                  const int i1 = screenplay->firstIndexOfScene(e1->scene());
+                  const int i2 = screenplay->firstIndexOfScene(e2->scene());
+                  e1->setStackLeader(false);
+                  e2->setStackLeader(false);
+                  if (i1 > i2)
+                      shifted = true;
+                  return i1 < i2;
+              });
+
+    list.first()->setStackLeader(true);
+    this->setTopmostElement(nullptr);
+
+    if (shifted) {
+        const QModelIndex start = this->index(0);
+        const QModelIndex end = this->index(list.size() - 1);
+        emit dataChanged(start, end);
+    }
+}
+
+void StructureElementStack::stackEm(const QList<StructureElement *> &elements)
+{
+    if (elements.isEmpty())
+        return;
+
+    const QString newStackId = elements.size() == 1 ? QString() : QUuid::createUuid().toString();
+    for (StructureElement *element : elements)
+        element->setStackId(newStackId);
 }
 
 void StructureElementStack::timerEvent(QTimerEvent *te)
@@ -620,28 +694,8 @@ void StructureElementStack::initialize()
 
     this->setGeometry(QRectF(x, y, w, h));
 
-    if (screenplay != nullptr) {
-        bool shifted = false;
-        std::sort(list.begin(), list.end(),
-                  [screenplay, &shifted](StructureElement *e1, StructureElement *e2) {
-                      const int i1 = screenplay->firstIndexOfScene(e1->scene());
-                      const int i2 = screenplay->firstIndexOfScene(e2->scene());
-                      e1->setStackLeader(false);
-                      e2->setStackLeader(false);
-                      if (i1 > i2)
-                          shifted = true;
-                      return i1 < i2;
-                  });
-
-        list.first()->setStackLeader(true);
-        this->setTopmostElement(nullptr);
-
-        if (shifted) {
-            const QModelIndex start = this->index(0);
-            const QModelIndex end = this->index(list.size() - 1);
-            emit dataChanged(start, end);
-        }
-    }
+    if (screenplay != nullptr)
+        this->sortByScreenplayOccurance(screenplay);
 
     const QStringList groups = stackGroups.values();
     for (StructureElement *element : qAsConst(this->list())) {
@@ -1576,7 +1630,7 @@ void Character::serializeToJson(QJsonObject &json) const
 {
     DocumentFileSystem *dfs = m_structure->scriteDocument()->fileSystem();
     QJsonArray array;
-    for (const QString photo : m_photos)
+    for (const QString &photo : m_photos)
         array.append(dfs->relativePath(photo));
     json.insert("photos", array);
 }

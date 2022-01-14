@@ -1050,6 +1050,9 @@ Item {
 
                     var fbbl = Scrite.document.structure.forceBeatBoardLayout
 
+                    if(!fbbl)
+                        element.undoRedoEnabled = true
+
                     switch(event.key) {
                     case Qt.Key_Left:
                         if(fbbl) return
@@ -1085,6 +1088,8 @@ Item {
                             canvasScroll.deleteElement(element)
                         break
                     }
+
+                    element.undoRedoEnabled = false
                 }
             }
 
@@ -1476,6 +1481,32 @@ Item {
                             }
                         }
                     }
+                }
+            }
+
+            DropArea {
+                id: catchAllDropArea
+                anchors.fill: parent
+                keys: ["scrite/sceneID"]
+                onDropped: (drop) => {
+                    var otherScene = Scrite.app.typeName(drop.source) === "ScreenplayElement" ? drop.source.scene : drop.source
+                    if(Scrite.document.screenplay.firstIndexOfScene(otherScene) < 0) {
+                        showInformation({
+                            "message": "Scenes must be added to the timeline before they can be stacked."
+                        })
+                        drop.ignore()
+                        return
+                    }
+
+                    var otherSceneId = otherScene.id
+                    var otherElement = Scrite.document.structure.findElementBySceneID(otherSceneId)
+                    if(otherElement === null) {
+                        drop.ignore()
+                        return
+                    }
+
+                    otherElement.unstack()
+                    drop.acceptProposedAction()
                 }
             }
 
@@ -1878,7 +1909,11 @@ Item {
         property bool allowed: true
 
         readonly property real maxSize: 150
-        property size previewSize: {
+        property size previewSize: evaluatePreviewSize()
+        width: previewSize.width
+        height: previewSize.height
+
+        function evaluatePreviewSize() {
             var w = Math.max(canvasItemsBoundingBox.width, 500)
             var h = Math.max(canvasItemsBoundingBox.height, 500)
 
@@ -1903,8 +1938,6 @@ Item {
 
             return Qt.size(w+10, h+10)
         }
-        width: previewSize.width
-        height: previewSize.height
 
         BoxShadow {
             anchors.fill: parent
@@ -2511,11 +2544,16 @@ Item {
 
                 // Move index-card around
                 MouseArea {
+                    id: moveMouseArea
                     anchors.fill: parent
                     acceptedButtons: Qt.LeftButton
                     onPressed: {
+                        elementItem.element.undoRedoEnabled = true
                         elementItem.select()
                         canvas.forceActiveFocus()
+                    }
+                    onReleased: {
+                        elementItem.element.undoRedoEnabled = false
                     }
 
                     drag.target: Scrite.document.readOnly || Scrite.document.structure.forceBeatBoardLayout ? null : elementItem
@@ -2938,7 +2976,7 @@ Item {
                     id: dropAreaForStacking
                     anchors.fill: parent
                     keys: ["scrite/sceneID"]
-                    onDropped: {
+                    onDropped: (drop) => {
                         var otherScene = Scrite.app.typeName(drop.source) === "ScreenplayElement" ? drop.source.scene : drop.source
                         if(Scrite.document.screenplay.firstIndexOfScene(otherScene) < 0) {
                             showInformation({
