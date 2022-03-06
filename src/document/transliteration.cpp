@@ -646,9 +646,8 @@ void TransliterationEngine::setPreferredFontFamilyForLanguage(
     const QString before = m_languageFontFamily.value(language);
 
     const int builtInFontId = m_languageBundledFontId.value(language);
-    const QString builtInFontFamily = builtInFontId < 0
-            ? QString()
-            : QFontDatabase::applicationFontFamilies(builtInFontId).first();
+    const QStringList appFontFamilies = QFontDatabase::applicationFontFamilies(builtInFontId);
+    const QString builtInFontFamily = builtInFontId < 0 ? QString() : appFontFamilies.first();
     if (fontFamily.isEmpty()
         || (!fontFamily.isEmpty() && !builtInFontFamily.isEmpty()
             && fontFamily == builtInFontFamily))
@@ -919,6 +918,17 @@ FontSyntaxHighlighter::FontSyntaxHighlighter(QObject *parent) : QSyntaxHighlight
     connect(TransliterationEngine::instance(),
             &TransliterationEngine::preferredFontFamilyForLanguageChanged, this,
             &FontSyntaxHighlighter::rehighlight);
+
+    if (parent != nullptr) {
+        QQuickItem *qmlItem = qobject_cast<QQuickItem *>(parent->parent());
+
+        if (qmlItem->inherits("QQuickTextEdit")) {
+            connect(qmlItem, SIGNAL(fontChanged(QFont)), this, SLOT(rehighlight()));
+        } else {
+            connect(qmlItem, &QQuickItem::widthChanged, this, &FontSyntaxHighlighter::rehighlight);
+            connect(qmlItem, &QQuickItem::heightChanged, this, &FontSyntaxHighlighter::rehighlight);
+        }
+    }
 }
 
 FontSyntaxHighlighter::~FontSyntaxHighlighter() { }

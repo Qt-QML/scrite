@@ -39,6 +39,7 @@
 #include <QMetaEnum>
 #include <QQuickItem>
 #include <QJsonArray>
+#include <QQuickStyle>
 #include <QMessageBox>
 #include <QJsonObject>
 #include <QColorDialog>
@@ -184,11 +185,29 @@ Application::Application(int &argc, char **argv, const QVersionNumber &version)
 
     this->setWindowIcon(QIcon(QStringLiteral(":/images/appicon.png")));
     this->computeIdealFontPointSize();
+
+    const bool useSoftwareRenderer = [=]() -> bool {
+#ifdef Q_OS_WIN
+        if (QOperatingSystemVersion::current() < QOperatingSystemVersion::Windows10)
+            return true;
+#endif
+        return m_settings->value(QStringLiteral("Application/useSoftwareRenderer"), false).toBool();
+    }();
+    const QString style = [=]() -> QString {
+        const QString ret = m_settings->value(QStringLiteral("Application/theme")).toString();
+        if (useSoftwareRenderer && ret == QStringLiteral("Material"))
+            return QStringLiteral("Default");
+        return Application::queryQtQuickStyleFor(ret);
+    }();
+
+    if (useSoftwareRenderer)
+        QQuickWindow::setSceneGraphBackend(QSGRendererInterface::Software);
+    QQuickStyle::setStyle(style);
 }
 
 QVersionNumber Application::prepare()
 {
-    const QVersionNumber applicationVersion(0, 8, 6);
+    const QVersionNumber applicationVersion(0, 8, 7);
 
     if (qApp != nullptr)
         return applicationVersion;
@@ -314,6 +333,34 @@ Application::Platform Application::platform() const
 }
 #endif
 #endif
+
+QStringList Application::availableThemes()
+{
+    // return QQuickStyle::availableStyles();
+    static QStringList themes({ QStringLiteral("Basic"), QStringLiteral("Fusion"),
+                                QStringLiteral("Imagine"), QStringLiteral("Material"),
+                                QStringLiteral("Universal") });
+    return themes;
+}
+
+QString Application::queryQtQuickStyleFor(const QString &theme)
+{
+    const QString defaultStyle = QStringLiteral("Material");
+    if (theme.isEmpty())
+        return defaultStyle;
+
+    const int idx = availableThemes().indexOf(theme);
+    if (idx < 0)
+        return defaultStyle;
+    if (idx == 0)
+        return QStringLiteral("Default");
+    return theme;
+}
+
+bool Application::usingMaterialTheme() const
+{
+    return QQuickStyle::name() == QStringLiteral("Material");
+}
 
 bool Application::isInternetAvailable() const
 {
@@ -1446,15 +1493,8 @@ bool Application::restoreWindowGeometry(QWindow *window, const QString &group)
             m_settings->value(group + QStringLiteral("/windowGeometry")).toString();
     if (geometryString == QStringLiteral("Maximized")) {
 #ifdef Q_OS_WIN
-        window->setGeometry(screenGeo);
-        QTimer *timer = new QTimer(window);
-        timer->setInterval(100);
-        timer->setSingleShot(true);
-        connect(timer, &QTimer::timeout, [=]() {
-            window->showMaximized();
-            timer->deleteLater();
-        });
-        timer->start();
+        ExecLaterTimer::call(
+                "window.showMaximized", window, [=]() { window->showMaximized(); }, 100);
 #else
         window->setGeometry(screenGeo);
 #endif

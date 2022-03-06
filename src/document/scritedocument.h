@@ -183,6 +183,7 @@ class ScriteDocument : public QObject, public QObjectSerializer::Interface
 public:
     static ScriteDocument *instance();
     ~ScriteDocument();
+    Q_SIGNAL void aboutToDelete(ScriteDocument *doc);
 
     Q_PROPERTY(bool readOnly READ isReadOnly NOTIFY readOnlyChanged)
     bool isReadOnly() const { return m_readOnly; }
@@ -196,6 +197,17 @@ public:
     Q_PROPERTY(bool empty READ isEmpty NOTIFY emptyChanged)
     bool isEmpty() const;
     Q_SIGNAL void emptyChanged();
+
+    Q_PROPERTY(QString documentId READ documentId NOTIFY documentIdChanged)
+    QString documentId() const { return m_documentId; }
+    Q_SIGNAL void documentIdChanged();
+
+    // Will be true of the currently open scrite document is from Scriptalay's
+    // script library.
+    Q_PROPERTY(bool fromScriptalay READ isFromScriptalay NOTIFY fromScriptalayChanged)
+    void setFromScriptalay(bool val);
+    bool isFromScriptalay() const { return m_fromScriptalay; }
+    Q_SIGNAL void fromScriptalayChanged();
 
     Q_PROPERTY(QString sessionId READ sessionId NOTIFY sessionIdChanged)
     QString sessionId() const { return m_sessionId; }
@@ -299,6 +311,7 @@ public:
     Q_PROPERTY(bool modified READ isModified NOTIFY modifiedChanged)
     bool isModified() const { return m_modified; }
     Q_SIGNAL void modifiedChanged();
+    Q_SIGNAL void documentChanged();
 
     Q_PROPERTY(QString fileName READ fileName NOTIFY fileNameChanged)
     QString fileName() const { return m_fileName; }
@@ -425,6 +438,7 @@ public:
 private:
     QString polishFileName(const QString &fileName) const;
     void setSessionId(QString val);
+    void setDocumentId(const QString &val);
 
 private:
     bool m_busy = false;
@@ -436,6 +450,8 @@ private:
     bool m_autoSaveMode = false;
     int m_maxBackupCount = 20;
     QString m_sessionId;
+    bool m_fromScriptalay = false;
+    QString m_documentId;
     QJsonObject m_userData;
     QString m_fileName;
     QString m_busyMessage;

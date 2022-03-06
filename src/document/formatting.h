@@ -142,7 +142,7 @@ public:
         TextAndBackgroundColors
     };
     Q_ENUM(Properties)
-    Q_INVOKABLE void applyToAll(Properties properties);
+    Q_INVOKABLE void applyToAll(SceneElementFormat::Properties properties);
 
     Q_INVOKABLE void beginTransaction();
     Q_INVOKABLE bool hasChangesToCommit() { return m_nrChangesDuringTransation > 0; }
@@ -152,7 +152,7 @@ public:
     bool isInTransaction() const { return m_inTransaction; }
     Q_SIGNAL void inTransactionChanged();
 
-    void resetToDefaults();
+    void resetToFactoryDefaults();
 
 private:
     friend class ScreenplayFormat;
@@ -260,6 +260,8 @@ public:
 
     void configure(QTextDocument *document) const;
     void configure(QPagedPaintDevice *printer) const;
+
+    Q_INVOKABLE void evaluateRectsNow();
 
 signals:
     void rectsChanged();
@@ -373,7 +375,10 @@ public:
     int secondsPerPage() const { return m_secondsPerPage; }
     Q_SIGNAL void secondsPerPageChanged();
 
-    Q_INVOKABLE void resetToDefaults();
+    Q_INVOKABLE void resetToFactoryDefaults();
+
+    Q_INVOKABLE bool saveAsUserDefaults();
+    Q_INVOKABLE void resetToUserDefaults();
 
     Q_INVOKABLE void beginTransaction();
     Q_INVOKABLE bool hasChangesToCommit() { return m_nrChangesDuringTransation > 0; }
@@ -530,6 +535,16 @@ public:
     QStringList characterNames() const { return m_characterNames; }
     Q_SIGNAL void characterNamesChanged();
 
+    Q_PROPERTY(QStringList transitions READ transitions WRITE setTransitions NOTIFY transitionsChanged)
+    void setTransitions(const QStringList &val);
+    QStringList transitions() const { return m_transitions; }
+    Q_SIGNAL void transitionsChanged();
+
+    Q_PROPERTY(QStringList shots READ shots WRITE setShots NOTIFY shotsChanged)
+    void setShots(const QStringList &val);
+    QStringList shots() const { return m_shots; }
+    Q_SIGNAL void shotsChanged();
+
     Q_PROPERTY(SceneElement* currentElement READ currentElement NOTIFY currentElementChanged RESET resetCurrentElement)
     SceneElement *currentElement() const { return m_currentElement; }
     Q_SIGNAL void currentElementChanged();
@@ -669,6 +684,7 @@ private:
     friend class SpellCheckService;
     qreal m_textWidth = 0;
     int m_cursorPosition = -1;
+    bool m_pastingContent = false;
     int m_documentLoadCount = 0;
     TextFormat *m_textFormat = new TextFormat(this);
     bool m_sceneIsBeingReset = false;
@@ -677,6 +693,8 @@ private:
     bool m_applyLanguageFonts = false;
     QString m_completionPrefix;
     bool m_initializingDocument = false;
+    QStringList m_shots;
+    QStringList m_transitions;
     QStringList m_characterNames;
     bool m_liveSpellCheckEnabled = true;
     QObjectProperty<Scene> m_scene;

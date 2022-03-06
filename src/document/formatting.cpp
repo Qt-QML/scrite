@@ -22,15 +22,17 @@
 #include <QMarginsF>
 #include <QSettings>
 #include <QMetaEnum>
+#include <QMimeData>
+#include <QClipboard>
 #include <QPdfWriter>
+#include <QScopeGuard>
 #include <QTextCursor>
 #include <QPageLayout>
 #include <QFontDatabase>
-#include <QTextBlockUserData>
-#include <QClipboard>
-#include <QMimeData>
 #include <QJsonDocument>
+#include <QTextBlockUserData>
 #include <QTextBoundaryFinder>
+#include <QScopedValueRollback>
 
 struct ParagraphMetrics
 {
@@ -368,7 +370,7 @@ void SceneElementFormat::commitTransaction()
     m_nrChangesDuringTransation = 0;
 }
 
-void SceneElementFormat::resetToDefaults()
+void SceneElementFormat::resetToFactoryDefaults()
 {
     this->setFont(m_format->defaultFont());
     this->setLineHeight(0.85);
@@ -511,6 +513,14 @@ void ScreenplayPageLayout::configure(QPagedPaintDevice *printer) const
     printer->setPageLayout(m_pageLayout);
 }
 
+void ScreenplayPageLayout::evaluateRectsNow()
+{
+    if (m_evaluateRectsTimer.isActive()) {
+        m_evaluateRectsTimer.stop();
+        this->evaluateRects();
+    }
+}
+
 void ScreenplayPageLayout::evaluateRects()
 {
     if (m_format->screen()) {
@@ -563,7 +573,7 @@ void ScreenplayPageLayout::evaluateRects()
 
 void ScreenplayPageLayout::evaluateRectsLater()
 {
-    m_evaluateRectsTimer.start(100, this);
+    m_evaluateRectsTimer.start(0, this);
 }
 
 void ScreenplayPageLayout::timerEvent(QTimerEvent *event)
@@ -601,7 +611,7 @@ ScreenplayFormat::ScreenplayFormat(QObject *parent)
                 emit formatChanged();
             });
 
-    this->resetToDefaults();
+    ExecLaterTimer::call("resetToUserDefaults", this, [=]() { this->resetToUserDefaults(); });
 }
 
 ScreenplayFormat::~ScreenplayFormat() { }
@@ -770,7 +780,7 @@ void ScreenplayFormat::setSecondsPerPage(int val)
     emit formatChanged();
 }
 
-void ScreenplayFormat::resetToDefaults()
+void ScreenplayFormat::resetToFactoryDefaults()
 {
     QSettings *settings = Application::instance()->settings();
     const int iPaperSize = settings->value("PageSetup/paperSize").toInt();
@@ -803,7 +813,7 @@ void ScreenplayFormat::resetToDefaults()
     }
 
     for (int i = SceneElement::Min; i <= SceneElement::Max; i++)
-        m_elementFormats.at(i)->resetToDefaults();
+        m_elementFormats.at(i)->resetToFactoryDefaults();
 
     const ParagraphMetrics paraMetrics;
     const qreal lm = paraMetrics.leftMargin;
@@ -820,6 +830,58 @@ void ScreenplayFormat::resetToDefaults()
         m_elementFormats[i]->setFontCapitalization(paraMetrics.fontCappingOf(i));
         m_elementFormats[i]->setTextAlignment(paraMetrics.textAlignOf(i));
     }
+}
+
+bool ScreenplayFormat::saveAsUserDefaults()
+{
+    const QJsonObject json = QObjectSerializer::toJson(this);
+    const QJsonDocument jsonDoc(json);
+    const QByteArray jsonStr = jsonDoc.toJson();
+
+    const QFileInfo settingsPath(Application::instance()->settingsFilePath());
+    const QString formatFile =
+            settingsPath.absoluteDir().absoluteFilePath(QStringLiteral("formatting.json"));
+
+    QFile file(formatFile);
+    if (!file.open(QFile::WriteOnly))
+        return false;
+
+    file.write(jsonStr);
+    return true;
+}
+
+void ScreenplayFormat::resetToUserDefaults()
+{
+    const QFileInfo settingsPath(Application::instance()->settingsFilePath());
+    const QString formatFile =
+            settingsPath.absoluteDir().absoluteFilePath(QStringLiteral("formatting.json"));
+
+    this->resetToFactoryDefaults();
+
+    if (!QFile::exists(formatFile))
+        return;
+
+    QFile file(formatFile);
+    if (!file.open(QFile::ReadOnly))
+        return;
+
+    const QByteArray jsonStr = file.readAll();
+    if (jsonStr.isEmpty())
+        return;
+
+    QJsonParseError jsonError;
+    const QJsonDocument jsonDoc = QJsonDocument::fromJson(jsonStr, &jsonError);
+    if (jsonError.error != QJsonParseError::NoError)
+        return;
+
+    if (!jsonDoc.isObject())
+        return;
+
+    const QJsonObject json = jsonDoc.object();
+    if (json.isEmpty())
+        return;
+
+    QObjectSerializer::fromJson(json, this);
 }
 
 void ScreenplayFormat::beginTransaction()
@@ -1400,10 +1462,7 @@ void SceneDocumentBinder::setTextWidth(qreal val)
 
 void SceneDocumentBinder::setCursorPosition(int val)
 {
-    if (m_initializingDocument)
-        return;
-
-    if (m_cursorPosition == val)
+    if (m_initializingDocument || m_pastingContent || m_cursorPosition == val)
         return;
 
     if (m_textDocument == nullptr || this->document() == nullptr) {
@@ -1478,6 +1537,24 @@ void SceneDocumentBinder::setCharacterNames(const QStringList &val)
 
     m_characterNames = val;
     emit characterNamesChanged();
+}
+
+void SceneDocumentBinder::setTransitions(const QStringList &val)
+{
+    if (m_transitions == val)
+        return;
+
+    m_transitions = val;
+    emit transitionsChanged();
+}
+
+void SceneDocumentBinder::setShots(const QStringList &val)
+{
+    if (m_shots == val)
+        return;
+
+    m_shots = val;
+    emit shotsChanged();
 }
 
 void SceneDocumentBinder::setForceSyncDocument(bool val)
@@ -1776,49 +1853,98 @@ void SceneDocumentBinder::copy(int fromPosition, int toPosition)
 
 int SceneDocumentBinder::paste(int fromPosition)
 {
-    if (this->document() == nullptr)
+    if (this->document() == nullptr || m_pastingContent)
         return -1;
+
+    QScopedValueRollback<bool> pastingContentRollback(m_pastingContent, true);
+
+    struct Paragraph
+    {
+        Paragraph() { }
+        Paragraph(const QString &_text, SceneElement::Type _type = SceneElement::Action)
+            : text(_text), type(_type)
+        {
+        }
+
+        QString text;
+        SceneElement::Type type = SceneElement::Action;
+    };
+
+    QVector<Paragraph> paragraphs;
 
     const QClipboard *clipboard = Application::instance()->clipboard();
     const QMimeData *mimeData = clipboard->mimeData();
-    const QByteArray contentJson = mimeData->data(QStringLiteral("scrite/screenplay"));
-    if (contentJson.isEmpty())
-        return -1;
 
-    const QJsonArray content = QJsonDocument::fromJson(contentJson).array();
-    if (content.isEmpty())
-        return -1;
+    const QByteArray contentJson = mimeData->data(QStringLiteral("scrite/screenplay"));
+    if (contentJson.isEmpty()) {
+        if (mimeData->hasText()) {
+            const QStringList lines =
+                    mimeData->text().split(QStringLiteral("\n"), Qt::SkipEmptyParts);
+            for (const QString &line : lines) {
+                Paragraph paragraph;
+                paragraph.text = line;
+                paragraphs.append(paragraph);
+            }
+        }
+    } else {
+        const QJsonArray content = QJsonDocument::fromJson(contentJson).array();
+        if (content.isEmpty())
+            return -1;
+
+        for (const QJsonValue &item : content) {
+            const QJsonObject itemObject = item.toObject();
+            const int type = itemObject.value(QStringLiteral("type")).toInt();
+
+            Paragraph paragraph;
+            paragraph.type = (type < SceneElement::Min || type > SceneElement::Max
+                              || type == SceneElement::Heading)
+                    ? SceneElement::Action
+                    : SceneElement::Type(type);
+            paragraph.text = itemObject.value(QStringLiteral("text")).toString();
+            paragraphs.append(paragraph);
+        }
+    }
 
     fromPosition = fromPosition >= 0 ? fromPosition : m_cursorPosition;
 
     QTextCursor cursor(this->document());
-    cursor.setPosition(fromPosition >= 0 ? fromPosition : m_cursorPosition);
+    cursor.setPosition(fromPosition);
 
-    const bool pasteFormatting = content.size() > 1;
+    const bool pasteFormatting = paragraphs.size() > 1;
+    QTextBlock lastPastedBlock;
 
-    for (int i = 0; i < content.size(); i++) {
-        const QJsonObject item = content.at(i).toObject();
-        const int type = item.value(QStringLiteral("type")).toInt();
-        if (type < SceneElement::Min || type > SceneElement::Max || type == SceneElement::Heading)
-            continue;
-
+    for (int i = 0; i < paragraphs.size(); i++) {
+        const Paragraph paragraph = paragraphs.at(i);
         if (i > 0)
             cursor.insertBlock();
 
-        const QString text = item.value(QStringLiteral("text")).toString();
-        cursor.insertText(text);
+        cursor.insertText(paragraph.text);
 
         if (pasteFormatting) {
-            SceneDocumentBlockUserData *userData = SceneDocumentBlockUserData::get(cursor.block());
+            lastPastedBlock = cursor.block();
+            SceneDocumentBlockUserData *userData = SceneDocumentBlockUserData::get(lastPastedBlock);
             if (userData) {
-                userData->sceneElement()->setType(SceneElement::Type(type));
+                if (userData->sceneElement())
+                    userData->sceneElement()->setType(paragraph.type);
                 userData->resetFormat();
             }
         }
     }
 
-    const int ret = cursor.position();
     this->refresh();
+
+    int ret = cursor.position();
+
+    if (pasteFormatting && lastPastedBlock.isValid()) {
+        m_rehighlightTimer.stop();
+        this->rehighlight();
+
+        cursor = QTextCursor(lastPastedBlock);
+        cursor.movePosition(QTextCursor::EndOfBlock);
+        ret = cursor.position();
+    }
+
+    ret = qMin(this->document()->characterCount(), ret);
 
     return ret;
 }
@@ -2351,33 +2477,15 @@ void SceneDocumentBinder::evaluateAutoCompleteHints()
         return;
     }
 
-    static QStringList transitions = QStringList()
-            << QStringLiteral("CUT TO") << QStringLiteral("DISSOLVE TO")
-            << QStringLiteral("FADE IN") << QStringLiteral("FADE OUT") << QStringLiteral("FADE TO")
-            << QStringLiteral("FLASH CUT TO") << QStringLiteral("FREEZE FRAME")
-            << QStringLiteral("IRIS IN") << QStringLiteral("IRIS OUT")
-            << QStringLiteral("JUMP CUT TO") << QStringLiteral("MATCH CUT TO")
-            << QStringLiteral("MATCH DISSOLVE TO") << QStringLiteral("SMASH CUT TO")
-            << QStringLiteral("STOCK SHOT") << QStringLiteral("TIME CUT")
-            << QStringLiteral("WIPE TO");
-
-    static QStringList shots = QStringList()
-            << QStringLiteral("AIR") << QStringLiteral("CLOSE ON") << QStringLiteral("CLOSER ON")
-            << QStringLiteral("CLOSEUP") << QStringLiteral("ESTABLISHING")
-            << QStringLiteral("EXTREME CLOSEUP") << QStringLiteral("INSERT")
-            << QStringLiteral("POV") << QStringLiteral("SURFACE") << QStringLiteral("THREE SHOT")
-            << QStringLiteral("TWO SHOT") << QStringLiteral("UNDERWATER") << QStringLiteral("WIDE")
-            << QStringLiteral("WIDE ON") << QStringLiteral("WIDER ANGLE");
-
     switch (m_currentElement->type()) {
     case SceneElement::Character:
         hints = m_characterNames;
         break;
     case SceneElement::Transition:
-        hints = transitions;
+        hints = m_transitions;
         break;
     case SceneElement::Shot:
-        hints = shots;
+        hints = m_shots;
         break;
     default:
         break;

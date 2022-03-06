@@ -321,7 +321,7 @@ Item {
             return 34
         }
         Behavior on minimumDelegateWidth {
-            enabled: screenplayEditorSettings.enableAnimations
+            enabled: applicationSettings.enableAnimations
             NumberAnimation { duration: 250 }
         }
 
@@ -577,7 +577,7 @@ Item {
                     border.color: color === Qt.rgba(1,1,1,1) ? "black" : sceneColor
                     border.width: elementItemDelegate.active ? 2 : 1
                     Behavior on border.width {
-                        enabled: screenplayEditorSettings.enableAnimations
+                        enabled: applicationSettings.enableAnimations
                         NumberAnimation { duration: 400 }
                     }
 
@@ -669,11 +669,11 @@ Item {
                         onClicked: {
                             if(mouse.button === Qt.RightButton) {
                                 if(element.elementType === ScreenplayElement.BreakElementType) {
-                                    breakItemMenu.element = element
-                                    breakItemMenu.popup(this)
+                                    breakElementContextMenu.element = element
+                                    breakElementContextMenu.popup(this)
                                 } else {
-                                    elementItemMenu.element = element
-                                    elementItemMenu.popup(this)
+                                    sceneElementsContextMenu.element = element
+                                    sceneElementsContextMenu.popup(this)
                                 }
 
                                 Scrite.document.screenplay.currentElementIndex = index
@@ -762,7 +762,7 @@ Item {
                         visible: !Scrite.document.readOnly && enableDragDrop
                         enabled: visible
                         Behavior on scale {
-                            enabled: screenplayEditorSettings.enableAnimations
+                            enabled: applicationSettings.enableAnimations
                             NumberAnimation { duration: 250 }
                         }
 
@@ -818,7 +818,7 @@ Item {
 
     Loader {
         anchors.fill: screenplayElementList
-        active: screenplayEditorSettings.enableAnimations && !screenplayElementList.FocusTracker.hasFocus
+        active: applicationSettings.enableAnimations && !screenplayElementList.FocusTracker.hasFocus
         sourceComponent: Item {
             id: highlightedItemOverlay
 
@@ -892,7 +892,7 @@ Item {
 
 
     Menu2 {
-        id: breakItemMenu
+        id: breakElementContextMenu
         property ScreenplayElement element
         onClosed: element = null
 
@@ -900,77 +900,14 @@ Item {
             text: "Remove"
             enabled: !Scrite.document.readOnly
             onClicked: {
-                Scrite.document.screenplay.removeElement(breakItemMenu.element)
-                breakItemMenu.close()
+                Scrite.document.screenplay.removeElement(breakElementContextMenu.element)
+                breakElementContextMenu.close()
             }
         }
     }
 
-    Menu2 {
-        id: elementItemMenu
-        property ScreenplayElement element
-
-        SceneGroup {
-            id: elementItemMenuSceneGroup
-            structure: Scrite.document.structure
-        }
-
-        onAboutToShow: {
-            if(element.selected) {
-                Scrite.document.screenplay.gatherSelectedScenes(elementItemMenuSceneGroup)
-            } else {
-                Scrite.document.screenplay.clearSelection()
-                element.selected = true
-                elementItemMenuSceneGroup.addScene(element.scene)
-            }
-        }
-
-        onClosed: {
-            element = null
-            elementItemMenuSceneGroup.clearScenes()
-        }
-
-        ColorMenu {
-            title: "Color"
-            enabled: !Scrite.document.readOnly && elementItemMenu.element
-            onMenuItemClicked: {
-                for(var i=0; i<elementItemMenuSceneGroup.sceneCount; i++) {
-                    elementItemMenuSceneGroup.sceneAt(i).color = color
-                }
-                elementItemMenu.close()
-            }
-        }
-
-        MarkSceneAsMenu {
-            title: "Mark Scene As"
-            scene: elementItemMenu.element ? elementItemMenu.element.scene : null
-            enabled: !Scrite.document.readOnly
-            onTriggered: {
-                for(var i=0; i<elementItemMenuSceneGroup.sceneCount; i++) {
-                    elementItemMenuSceneGroup.sceneAt(i).type = scene.type
-                }
-                elementItemMenu.close()
-            }
-        }
-
-        StructureGroupsMenu {
-            sceneGroup: elementItemMenuSceneGroup
-            enabled: !Scrite.document.readOnly
-        }
-
-        MenuSeparator { }
-
-        MenuItem2 {
-            text: "Remove"
-            enabled: !Scrite.document.readOnly
-            onClicked: {
-                if(elementItemMenuSceneGroup.sceneCount <= 1)
-                    Scrite.document.screenplay.removeElement(elementItemMenu.element)
-                else
-                    Scrite.document.screenplay.removeSelectedElements();
-                elementItemMenu.close()
-            }
-        }
+    ScreenplaySceneElementsContextMenu {
+        id: sceneElementsContextMenu
     }
 
     SequentialAnimation {

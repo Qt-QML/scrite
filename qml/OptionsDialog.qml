@@ -135,6 +135,7 @@ Item {
                             checked: modelData.active
                             text: modelData.key
                             onToggled: Scrite.app.transliterationEngine.markLanguage(modelData.value,checked)
+                            padding: 0
                         }
                     }
                 }
@@ -201,6 +202,13 @@ Item {
                                 onTextEdited: Scrite.document.maxBackupCount = parseInt(text)
                                 anchors.verticalCenter: parent.verticalCenter
                             }
+                        }
+
+                        CheckBox2 {
+                            text: "Enable Restore (" + (Scrite.document.autoSave ? "New Files Only" : "All Files") + ")"
+                            width: parent.width
+                            checked: Scrite.vault.enabled
+                            onToggled: Scrite.vault.enabled = checked
                         }
                     }
                 }
@@ -715,15 +723,73 @@ Item {
                 anchors.horizontalCenter: parent.horizontalCenter
 
                 GroupBox {
+                    id: graphicsGroup
                     width: (parent.width - parent.spacing)/2
                     label: Text {
-                        text: "Animations"
+                        text: "Graphics"
                     }
 
-                    CheckBox2 {
-                        checked: screenplayEditorSettings.enableAnimations
-                        text: "Enable Animations"
-                        onToggled: screenplayEditorSettings.enableAnimations = checked
+                    Column {
+                        width: graphicsGroup.availableWidth
+
+                        CheckBox2 {
+                            checked: applicationSettings.enableAnimations
+                            text: "Enable Animations"
+                            onToggled: applicationSettings.enableAnimations = checked
+                        }
+
+                        CheckBox2 {
+                            checked: applicationSettings.useSoftwareRenderer
+                            text: "Use Software Renderer"
+                            onToggled: {
+                                applicationSettings.useSoftwareRenderer = checked
+                                Notification.active = true
+                            }
+                            Notification.title: "Requires Restart"
+                            Notification.text: checked ? "Software renderer will be used when you restart Scrite." : "Accelerated graphics renderer will be used when you restart Scrite."
+                            Notification.autoClose: false
+                            ToolTip.text: "If you feel that Scrite is not responding fast enough, then you may want to switch to using a Software Renderer to speed things up. Otherwise, keep this option unchecked for best experience."
+                            ToolTip.visible: hovered
+                            ToolTip.delay: 1000
+                        }
+
+                        Row {
+                            width: parent.width
+                            spacing: 10
+
+                            Text {
+                                id: themeLabel
+                                text: "Theme: "
+                                leftPadding: 10
+                                font.pointSize: Scrite.app.idealFontPointSize-2
+                                anchors.verticalCenter: parent.verticalCenter
+                            }
+
+                            ComboBox2 {
+                                width: parent.width - themeLabel.width - parent.spacing
+                                anchors.verticalCenter: parent.verticalCenter
+                                model: Scrite.app.availableThemes
+                                readonly property int materialStyleIndex: Scrite.app.availableThemes.indexOf("Material");
+                                currentIndex: {
+                                    const idx = Scrite.app.availableThemes.indexOf(applicationSettings.theme)
+                                    if(idx < 0)
+                                        return materialStyleIndex
+                                    return idx
+                                }
+                                onCurrentTextChanged: {
+                                    const oldTheme = applicationSettings.theme
+                                    applicationSettings.theme = currentText
+                                    Notification.active = oldTheme !== currentText
+                                }
+                                Notification.title: "Requires Restart"
+                                Notification.text: "\"" + currentText + "\" theme will be used when you restart Scrite."
+                                Notification.autoClose: false
+
+                                ToolTip.text: "Scrite's UI is designed for use with Material theme and with software rendering disabled. If the UI is not rendering properly on your computer, then switching to a different theme may help."
+                                ToolTip.visible: hovered
+                                ToolTip.delay: 1000
+                            }
+                        }
                     }
                 }
 
@@ -840,6 +906,12 @@ Item {
                         }
                     }
                 }
+            }
+
+            Item {
+                height: 30
+                width: parent.width - 60
+                anchors.horizontalCenter: parent.horizontalCenter
             }
         }
     }
@@ -1869,17 +1941,39 @@ Item {
 
             currentIndex: 0
 
+            Component.onCompleted: Announcement.shout("DF77A452-FDB2-405C-8A0F-E48982012D36", "save")
+            Component.onDestruction: Announcement.shout("DF77A452-FDB2-405C-8A0F-E48982012D36", "restore")
+
             cornerContent: Item {
-                Button2 {
-                    text: "Reset"
+                Column {
+                    width: parent.width-40
                     anchors.horizontalCenter: parent.horizontalCenter
                     anchors.bottom: parent.bottom
-                    anchors.bottomMargin: 10
-                    onClicked: {
-                        Scrite.document.formatting.resetToDefaults()
-                        Scrite.document.printFormat.resetToDefaults()
+                    anchors.bottomMargin: 15
+                    spacing: 10
+
+                    Button2 {
+                        text: "Make Default"
+                        width: parent.width
+                        ToolTip.text: "Saves current formatting options as default for all current and future documents."
+                        ToolTip.visible: hovered
+                        onClicked: {
+                            Scrite.document.formatting.saveAsUserDefaults()
+                        }
+                    }
+
+                    Button2 {
+                        text: "Factory Reset"
+                        width: parent.width
+                        ToolTip.text: "Restores formatting options to defaults for current document only."
+                        ToolTip.visible: hovered
+                        onClicked: {
+                            Scrite.document.formatting.resetToFactoryDefaults()
+                            Scrite.document.printFormat.resetToFactoryDefaults()
+                        }
                     }
                 }
+
             }
 
             pageContent: Column {
@@ -1919,7 +2013,7 @@ Item {
                                         },
                                         SceneElement {
                                             type: SceneElement.Action
-                                            text: "Dr. Rajkumar enters the club house like a boss. He looks around at everybody in their eyes."
+                                            text: "Dr. Rajkumar enters the club house like a boss. He makes eye contact with everybody in the room."
                                         },
                                         SceneElement {
                                             type: SceneElement.Character

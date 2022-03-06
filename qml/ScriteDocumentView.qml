@@ -13,6 +13,7 @@
 
 import QtQml 2.15
 import QtQuick 2.15
+import QtQuick.Window 2.15
 import QtQuick.Dialogs 1.3
 import QtQuick.Layouts 1.15
 import Qt.labs.settings 1.0
@@ -70,6 +71,23 @@ Item {
     }
 
     Settings {
+        id: applicationSettings
+        fileName: Scrite.app.settingsFilePath
+        category: "Application"
+
+        property bool enableAnimations: true
+        property bool useSoftwareRenderer: false
+        property string theme: "Material"
+        onEnableAnimationsChanged: applyAnimationSettings()
+        Component.onCompleted: applyAnimationSettings()
+
+        function applyAnimationSettings() {
+            modalDialog.animationsEnabled = enableAnimations
+            statusText.enableAnimations = enableAnimations
+        }
+    }
+
+    Settings {
         id: workspaceSettings
         fileName: Scrite.app.settingsFilePath
         category: "Workspace"
@@ -105,7 +123,6 @@ Item {
         property int embeddedEditorZoomValue: -1
         property bool includeTitlePageInPreview: true
         property bool enableSpellCheck: false // until we can fix https://github.com/teriflix/scrite/issues/138
-        property bool enableAnimations: true
         property int lastLanguageRefreshNoticeBoxTimestamp: 0
         property int lastSpellCheckRefreshNoticeBoxTimestamp: 0
         property bool showLanguageRefreshNoticeBox: true
@@ -113,10 +130,6 @@ Item {
         property bool showLoglineEditor: false
         property bool allowTaggingOfScenes: false
         property real spaceBetweenScenes: 0
-        onEnableAnimationsChanged: {
-            modalDialog.animationsEnabled = enableAnimations
-            statusText.enableAnimations = enableAnimations
-        }
 
         property real textFormatDockWidgetX: -1
         property real textFormatDockWidgetY: -1
@@ -224,9 +237,9 @@ Item {
         context: Qt.ApplicationShortcut
         sequence: "Ctrl+Alt+A"
         ShortcutsModelItem.group: "Settings"
-        ShortcutsModelItem.title: screenplayEditorSettings.enableAnimations ? "Disable Animations" : "Enable Animations"
+        ShortcutsModelItem.title: applicationSettings.enableAnimations ? "Disable Animations" : "Enable Animations"
         ShortcutsModelItem.shortcut: sequence
-        onActivated: screenplayEditorSettings.enableAnimations = !screenplayEditorSettings.enableAnimations
+        onActivated: applicationSettings.enableAnimations = !applicationSettings.enableAnimations
     }
 
     Shortcut {
@@ -481,6 +494,9 @@ Item {
                 shortcut: "Ctrl+N"
                 shortcutText: "N"
                 onClicked: {
+                    if(Scrite.document.autoSave && Scrite.document.fileName !== "")
+                        Scrite.document.save()
+
                     if(Scrite.document.modified)
                         askQuestion({
                             "question": appToolBar.saveQuestionText(),
@@ -523,6 +539,9 @@ Item {
                 function doOpen(filePath) {
                     if(filePath === Scrite.document.fileName)
                         return
+
+                    if(Scrite.document.autoSave && Scrite.document.fileName !== "")
+                        Scrite.document.save()
 
                     if(Scrite.document.modified)
                         askQuestion({
@@ -580,7 +599,11 @@ Item {
 
                         Connections {
                             target: Scrite.document
-                            function onJustLoaded() { recentFilesMenu.add(Scrite.document.fileName) }
+                            function onJustLoaded() { Qt.callLater( ()=> {
+                                                                       if(Scrite.document.fileName !== "")
+                                                                            recentFilesMenu.add(Scrite.document.fileName)
+                                                                   } )
+                            }
                         }
 
                         property int nrRecentFiles: recentFiles.length
@@ -620,6 +643,18 @@ Item {
                         MenuItem2 {
                             text: "Open..."
                             onClicked: fileOpenButton.doOpen()
+                        }
+
+                        MenuItem2 {
+                            text: "Restore"
+                            enabled: Scrite.vault.documentCount > 0
+                            onClicked: {
+                                modalDialog.closeable = false
+                                modalDialog.closeOnEscape = true
+                                modalDialog.popupSource = fileOpenButton
+                                modalDialog.sourceComponent = documentVaultDialogBox
+                                modalDialog.active = true
+                            }
 
                             Rectangle {
                                 width: parent.width; height: 1
@@ -727,6 +762,9 @@ Item {
                 }
 
                 onClicked: {
+                    if(Scrite.document.autoSave && Scrite.document.fileName !== "")
+                        Scrite.document.save()
+
                     if(Scrite.document.modified)
                         askQuestion({
                             "question": appToolBar.saveQuestionText(),
@@ -808,6 +846,9 @@ Item {
                                     text: modelData
                                     onClicked: click()
                                     function click() {
+                                        if(Scrite.document.autoSave && Scrite.document.fileName !== "")
+                                            Scrite.document.save()
+
                                         if(Scrite.document.modified)
                                             askQuestion({
                                                     "question": "Do you want to save your current project first?",
@@ -1115,7 +1156,8 @@ Item {
                             MenuItem2 {
                                 property string baseText: modelData.key
                                 property string shortcutKey: Scrite.app.transliterationEngine.shortcutLetter(modelData.value)
-                                text: baseText + " (" + Scrite.app.polishShortcutTextForDisplay("Alt+"+shortcutKey) + ")"
+                                property string tabs: Scrite.app.isWindowsPlatform ? (modelData.value === TransliterationEngine.Malayalam ? "\t" : "\t\t") : "\t\t"
+                                text: baseText + tabs + "" + Scrite.app.polishShortcutTextForDisplay("Alt+"+shortcutKey)
                                 font.bold: Scrite.app.transliterationEngine.language === modelData.value
                                 onClicked: {
                                     Scrite.app.transliterationEngine.language = modelData.value
@@ -1128,7 +1170,7 @@ Item {
                         MenuSeparator { }
 
                         MenuItem2 {
-                            text: "Next-Language (F10)"
+                            text: "Next-Language\tF10"
                             onClicked: {
                                 Scrite.app.transliterationEngine.cycleLanguage()
                                 Scrite.document.formatting.defaultLanguage = Scrite.app.transliterationEngine.language
@@ -1625,7 +1667,7 @@ Item {
                             source: modelData.icon
                             width: parent.active ? 32 : 24; height: width
                             Behavior on width {
-                                enabled: screenplayEditorSettings.enableAnimations
+                                enabled: applicationSettings.enableAnimations
                                 NumberAnimation { duration: 250 }
                             }
 
@@ -1844,6 +1886,7 @@ Item {
             }
 
             Loader {
+                id: uiLoader
                 anchors.fill: parent
                 anchors.topMargin: 1
                 clip: true
@@ -1855,6 +1898,16 @@ Item {
                     }
                     return screenplayEditorComponent
                 }
+
+                Announcement.onIncoming: (type,data) => {
+                                             const stype = "" + type
+                                             if(mainTabBar.currentIndex === 0 && stype === "{f4048da2-775d-11ec-90d6-0242ac120003}") {
+                                                 uiLoader.active = false
+                                                 Scrite.app.execLater(uiLoader, 250, function() {
+                                                    uiLoader.active = true
+                                                 })
+                                             }
+                                         }
             }
         }
     }
@@ -1863,7 +1916,53 @@ Item {
         id: screenplayEditorComponent
 
         ScreenplayEditor {
-            zoomLevelModifier: mainTabBar.currentIndex > 0 ? -3 : 0
+            // zoomLevelModifier: mainTabBar.currentIndex > 0 ? -3 : 0
+            Component.onCompleted: {
+                const evalZoomLevelModifierFn = () => {
+                    screenplayFormat.pageLayout.evaluateRectsNow()
+
+                    const pageLayout = screenplayFormat.pageLayout
+                    const zoomLevels = screenplayFormat.fontZoomLevels
+                    const indexOfZoomLevel = (val) => {
+                        for(var i=0; i<zoomLevels.length; i++) {
+                            if(zoomLevels[i] === val)
+                                return i
+                        }
+                        return -1
+                    }
+                    const _oneValue = indexOfZoomLevel(1)
+
+                    const availableWidth = mainTabBar.currentIndex === 0 ? width-500 : width
+                    var _value = _oneValue
+                    var zl = zoomLevels[_value]
+                    var pageWidth = pageLayout.paperWidth * zl * Screen.devicePixelRatio
+                    var totalMargin = availableWidth - pageWidth
+                    if(totalMargin < 0) {
+                        while(totalMargin < 20) { // 20 is width of vertical scrollbar.
+                            if(_value-1 < 0)
+                                break
+                            _value = _value - 1
+                            zl = zoomLevels[_value]
+                            pageWidth = pageLayout.paperWidth * zl * Screen.devicePixelRatio
+                            totalMargin = availableWidth - pageWidth
+                        }
+                    } else if(totalMargin > pageWidth/2) {
+                        while(totalMargin > pageWidth/2) {
+                            if(_value >= zoomLevels.length-1)
+                                break
+                            _value = _value + 1
+                            zl = zoomLevels[_value]
+                            pageWidth = pageLayout.paperWidth * zl * Screen.devicePixelRatio
+                            totalMargin = availableWidth - pageWidth
+                        }
+                    }
+
+                    return _value - _oneValue
+                }
+
+                zoomLevelModifier = evalZoomLevelModifierFn()
+            }            
+
             additionalCharacterMenuItems: {
                 if(mainTabBar.currentIndex === 1) {
                     if(showNotebookInStructure)
@@ -1879,7 +1978,7 @@ Item {
                 return []
             }
             Behavior on opacity {
-                enabled: screenplayEditorSettings.enableAnimations
+                enabled: applicationSettings.enableAnimations
                 NumberAnimation { duration: 250 }
             }
 
@@ -2203,7 +2302,7 @@ Item {
                     FocusTracker.window: Scrite.window
 
                     Behavior on color {
-                        enabled: screenplayEditorSettings.enableAnimations
+                        enabled: applicationSettings.enableAnimations
                         ColorAnimation { duration: 250 }
                     }
 
@@ -2480,9 +2579,9 @@ Item {
             onOpenInThisWindow: {
                 contentLoader.allowContent = false
                 Scrite.document.openAnonymously(filePath)
-                modalDialog.close()
-                Scrite.app.execLater(contentLoader, 300, function() {
+                Scrite.app.execLater(contentLoader, 50, function() {
                     contentLoader.allowContent = true
+                    modalDialog.close()
                 })
             }
             onOpenInNewWindow: {
@@ -2491,6 +2590,21 @@ Item {
                     modalDialog.close()
                 })
             }
+        }
+    }
+
+    Component {
+        id: documentVaultDialogBox
+
+        DocumentVault {
+            onOpenRequest: (filePath) => {
+                               contentLoader.allowContent = false
+                               Scrite.document.openAnonymously(filePath)
+                               Scrite.app.execLater(contentLoader, 50, function() {
+                                   contentLoader.allowContent = true
+                                   modalDialog.close()
+                               })
+                           }
         }
     }
 
@@ -2511,6 +2625,13 @@ Item {
                         close.accepted = true
                         return
                     }
+
+                    if(Scrite.document.autoSave && Scrite.document.fileName !== "") {
+                        Scrite.document.save()
+                        close.accepted = true
+                        return
+                    }
+
                     close.accepted = false
                     askQuestion({
                         "question": "Do you want to save your current project before closing?",
@@ -2616,6 +2737,9 @@ Item {
         if(Scrite.app.maybeOpenAnonymously())
             splashLoader.active = false
         screenplayAdapter.sessionId = Scrite.document.sessionId
+        Qt.callLater( function() {
+            Announcement.shout("{f4048da2-775d-11ec-90d6-0242ac120003}", "restoreWindowGeometryDone")
+        })
     }
 
     BusyOverlay {

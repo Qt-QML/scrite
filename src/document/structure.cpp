@@ -16,6 +16,7 @@
 #include "hourglass.h"
 #include "aggregation.h"
 #include "errorreport.h"
+#include "filemanager.h"
 #include "application.h"
 #include "focustracker.h"
 #include "timeprofiler.h"
@@ -24,7 +25,9 @@
 #include "structureexporter.h"
 
 #include <QDir>
+#include <QtMath>
 #include <QStack>
+#include <QBuffer>
 #include <QJSValue>
 #include <QMimeData>
 #include <QDateTime>
@@ -175,14 +178,9 @@ void StructureElement::setFollow(QQuickItem *val)
 
     emit followChanged();
 
-    QTimer *timer = new QTimer(this);
-    timer->setInterval(250);
-    timer->setSingleShot(true);
-    connect(timer, &QTimer::timeout, [=]() {
-        this->setSyncWithFollow(true);
-        timer->deleteLater();
-    });
-    timer->start();
+    ExecLaterTimer::call(
+            "StructureElement::setSyncWithFollow", this, [=]() { this->setSyncWithFollow(true); },
+            250);
 }
 
 void StructureElement::setUndoRedoEnabled(bool val)
@@ -1160,9 +1158,9 @@ Character::Character(QObject *parent)
 
     if (m_structure) {
         connect(this, &Character::tagsChanged, m_structure,
-                &Structure::updateCharacterNamesAndTagsLater);
+                &Structure::updateCharacterNamesShotsTransitionsAndTagsLater);
         connect(this, &Character::priorityChanged, m_structure,
-                &Structure::updateCharacterNamesAndTagsLater);
+                &Structure::updateCharacterNamesShotsTransitionsAndTagsLater);
     }
 }
 
@@ -1699,9 +1697,9 @@ bool Character::event(QEvent *event)
         m_structure = qobject_cast<Structure *>(this->parent());
         if (m_structure) {
             connect(this, &Character::tagsChanged, m_structure,
-                    &Structure::updateCharacterNamesAndTagsLater);
+                    &Structure::updateCharacterNamesShotsTransitionsAndTagsLater);
             connect(this, &Character::priorityChanged, m_structure,
-                    &Structure::updateCharacterNamesAndTagsLater);
+                    &Structure::updateCharacterNamesShotsTransitionsAndTagsLater);
         }
     }
 
@@ -2238,16 +2236,38 @@ QUrl Annotation::imageUrl(const QString &name) const
 
 void Annotation::createCopyOfFileAttributes()
 {
+    DocumentFileSystem *dfs = ScriteDocument::instance()->fileSystem();
+    FileManager fileManager;
+
     for (int i = 0; i < m_metaData.size(); i++) {
         const QJsonObject item = m_metaData.at(i).toObject();
         const QJsonValue isFileVal = item.value(QStringLiteral("isFile"));
         if (isFileVal.isBool() && isFileVal.toBool()) {
             const QString attrName = item.value(QStringLiteral("name")).toString();
-            const QString fileName = m_attributes.value(attrName).toString();
+            QString fileName = m_attributes.value(attrName).toString();
             if (fileName.isEmpty())
                 continue;
 
-            DocumentFileSystem *dfs = ScriteDocument::instance()->fileSystem();
+            // Special case scenario only for images.
+            const QString imageKey = QStringLiteral("image");
+            if (m_type == imageKey && attrName == imageKey) {
+                const QString base64Prefix = QStringLiteral("data://base64:");
+                if (fileName.startsWith(base64Prefix)) {
+                    QByteArray bytes = fileName.midRef(base64Prefix.length()).toLatin1();
+                    bytes = QByteArray::fromBase64(bytes);
+                    QBuffer buffer(&bytes);
+                    buffer.open(QIODevice::ReadOnly);
+                    QImage image;
+                    if (image.load(&buffer, "JPG")) {
+                        const QString tmpFile = dfs->absolutePath(QStringLiteral("tmp.jpg"));
+                        image.save(tmpFile, "JPG");
+                        fileManager.addToAutoDeleteList(tmpFile);
+                        fileName = dfs->relativePath(tmpFile);
+                    } else
+                        fileName.clear();
+                }
+            }
+
             m_attributes.insert(attrName, dfs->duplicate(fileName, QStringLiteral("annotation")));
             emit attributesChanged();
         }
@@ -2319,6 +2339,29 @@ void Annotation::onDfsAuction(const QString &filePath, int *claims)
 
 ///////////////////////////////////////////////////////////////////////////////
 
+static QStringList defaultTransitions()
+{
+    return QStringList({ QStringLiteral("CUT TO"), QStringLiteral("DISSOLVE TO"),
+                         QStringLiteral("FADE IN"), QStringLiteral("FADE OUT"),
+                         QStringLiteral("FADE TO"), QStringLiteral("FLASH CUT TO"),
+                         QStringLiteral("FREEZE FRAME"), QStringLiteral("IRIS IN"),
+                         QStringLiteral("IRIS OUT"), QStringLiteral("JUMP CUT TO"),
+                         QStringLiteral("MATCH CUT TO"), QStringLiteral("MATCH DISSOLVE TO"),
+                         QStringLiteral("SMASH CUT TO"), QStringLiteral("STOCK SHOT"),
+                         QStringLiteral("TIME CUT"), QStringLiteral("WIPE TO") });
+}
+
+static QStringList defaultShots()
+{
+    return QStringList({ QStringLiteral("AIR"), QStringLiteral("CLOSE ON"),
+                         QStringLiteral("CLOSER ON"), QStringLiteral("CLOSEUP"),
+                         QStringLiteral("ESTABLISHING"), QStringLiteral("EXTREME CLOSEUP"),
+                         QStringLiteral("INSERT"), QStringLiteral("POV"), QStringLiteral("SURFACE"),
+                         QStringLiteral("THREE SHOT"), QStringLiteral("TWO SHOT"),
+                         QStringLiteral("UNDERWATER"), QStringLiteral("WIDE"),
+                         QStringLiteral("WIDE ON"), QStringLiteral("WIDER ANGLE") });
+}
+
 Structure::Structure(QObject *parent)
     : QObject(parent),
       m_scriteDocument(qobject_cast<ScriteDocument *>(parent)),
@@ -2338,6 +2381,13 @@ Structure::Structure(QObject *parent)
 
     QClipboard *clipboard = qApp->clipboard();
     connect(clipboard, &QClipboard::dataChanged, this, &Structure::onClipboardDataChanged);
+
+    // Load clipboard data after the constructor returns
+    QTimer *clipboardTimer = new QTimer(this);
+    clipboardTimer->setSingleShot(true);
+    connect(clipboardTimer, &QTimer::timeout, this, &Structure::onClipboardDataChanged);
+    connect(clipboardTimer, &QTimer::timeout, clipboardTimer, &QTimer::deleteLater);
+    clipboardTimer->start();
 
     m_elementsBoundingBoxAggregator.setModel(&m_elements);
     m_elementsBoundingBoxAggregator.setAggregateFunction(
@@ -2376,6 +2426,9 @@ Structure::Structure(QObject *parent)
     }
 
     this->loadDefaultGroupsData();
+
+    m_transitions = defaultTransitions();
+    m_shots = defaultShots();
 }
 
 Structure::~Structure()
@@ -2470,7 +2523,7 @@ void Structure::addCharacter(Character *ptr)
     m_characters.append(ptr);
     emit characterCountChanged();
 
-    this->updateCharacterNamesAndTagsLater();
+    this->updateCharacterNamesShotsTransitionsAndTagsLater();
 }
 
 void Structure::removeCharacter(Character *ptr)
@@ -2489,7 +2542,7 @@ void Structure::removeCharacter(Character *ptr)
 
     emit characterCountChanged();
 
-    this->updateCharacterNamesAndTagsLater();
+    this->updateCharacterNamesShotsTransitionsAndTagsLater();
 
     if (ptr->parent() == this)
         GarbageCollector::instance()->add(ptr);
@@ -2527,7 +2580,7 @@ void Structure::setCharacters(const QList<Character *> &list)
     m_characters.assign(list2);
     emit characterCountChanged();
 
-    this->updateCharacterNamesAndTagsLater();
+    this->updateCharacterNamesShotsTransitionsAndTagsLater();
 }
 
 void Structure::clearCharacters()
@@ -2773,7 +2826,7 @@ void Structure::setElements(const QList<StructureElement *> &list)
     emit elementCountChanged();
     emit elementsChanged();
 
-    this->updateCharacterNamesAndTagsLater();
+    this->updateCharacterNamesShotsTransitionsAndTagsLater();
 }
 
 StructureElement *Structure::elementAt(int index) const
@@ -2948,14 +3001,12 @@ void Structure::setForceBeatBoardLayout(bool val)
 
     m_forceBeatBoardLayout = val;
     if (val && ScriteDocument::instance()->structure() == this) {
-        QTimer *timer = new QTimer(this);
-        timer->setInterval(250);
-        timer->setSingleShot(true);
-        connect(timer, &QTimer::timeout, [=]() {
-            this->placeElementsInBeatBoardLayout(ScriteDocument::instance()->screenplay());
-            timer->deleteLater();
-        });
-        timer->start();
+        ExecLaterTimer::call(
+                "Structure::placeElementsInBeatBoardLayout", this,
+                [=]() {
+                    this->placeElementsInBeatBoardLayout(ScriteDocument::instance()->screenplay());
+                },
+                250);
     }
 
     emit forceBeatBoardLayoutChanged();
@@ -4017,6 +4068,23 @@ void Structure::copy(QObject *elementOrAnnotation)
             QJsonObject sceneJson = objectJson.value(QStringLiteral("scene")).toObject();
             sceneJson.remove(QStringLiteral("id"));
             objectJson.insert(QStringLiteral("scene"), sceneJson);
+        } else if (annotation != nullptr) {
+            if (annotation->type() == QStringLiteral("image")) {
+                const QString attrKey = QStringLiteral("attributes");
+                const QString imageKey = QStringLiteral("image");
+
+                QJsonObject attrJson = objectJson.value(attrKey).toObject();
+                QString imageVal = attrJson.value(imageKey).toString();
+
+                imageVal = [imageVal]() {
+                    DocumentFileSystem *dfs = ScriteDocument::instance()->fileSystem();
+                    const QByteArray imageBytes = dfs->read(imageVal);
+                    return QStringLiteral("data://base64:") + imageBytes.toBase64();
+                }();
+
+                attrJson.insert(imageKey, imageVal);
+                objectJson.insert(attrKey, attrJson);
+            }
         }
 
         QJsonObject clipboardJson;
@@ -4053,28 +4121,144 @@ static inline QJsonObject fetchPasteDataFromClipboard(QString *className = nullp
     if (mimeData == nullptr)
         return ret;
 
-    const QByteArray clipboardText = mimeData->data(QStringLiteral("scrite/structure"));
-    if (clipboardText.isEmpty())
-        return ret;
+    QJsonObject data;
 
-    QJsonParseError parseError;
-    const QJsonDocument jsonDoc = QJsonDocument::fromJson(clipboardText, &parseError);
-    if (parseError.error != QJsonParseError::NoError)
-        return ret;
+    const QString structureMimeType = QStringLiteral("scrite/structure");
+    if (mimeData->hasFormat(structureMimeType)) {
+        const QByteArray clipboardText = mimeData->data(structureMimeType);
+        if (clipboardText.isEmpty())
+            return ret;
 
-    const QString appString =
-            qApp->applicationName() + QStringLiteral("-") + qApp->applicationVersion();
+        QJsonParseError parseError;
+        const QJsonDocument jsonDoc = QJsonDocument::fromJson(clipboardText, &parseError);
+        if (parseError.error != QJsonParseError::NoError)
+            return ret;
 
-    const QJsonObject clipboardJson = jsonDoc.object();
-    if (clipboardJson.value(QStringLiteral("app")).toString() != appString)
-        return ret; // We dont want to support copy/paste between different versions of Scrite.
+        const QString appString =
+                qApp->applicationName() + QStringLiteral("-") + qApp->applicationVersion();
 
-    if (clipboardJson.value(QStringLiteral("source")).toString() != QStringLiteral("Structure"))
-        return ret;
+        const QJsonObject clipboardJson = jsonDoc.object();
+        if (clipboardJson.value(QStringLiteral("app")).toString() != appString)
+            return ret; // We dont want to support copy/paste between different versions of Scrite.
 
-    const QJsonObject data = clipboardJson.value("data").toObject();
-    if (!data.isEmpty() && className)
-        *className = clipboardJson.value(QStringLiteral("class")).toString();
+        if (clipboardJson.value(QStringLiteral("source")).toString() != QStringLiteral("Structure"))
+            return ret;
+
+        data = clipboardJson.value("data").toObject();
+        if (!data.isEmpty() && className)
+            *className = clipboardJson.value(QStringLiteral("class")).toString();
+    } else {
+        const QString text = mimeData->hasText() ? mimeData->text() : QString();
+        const QUrl url = mimeData->hasUrls() ? [mimeData]() {
+            const QList<QUrl> urls = mimeData->urls();
+            return urls.first();
+        }() : QUrl(text);
+
+        if (mimeData->hasImage()) {
+            const QImage image = mimeData->imageData().value<QImage>();
+
+            QByteArray imageBytes;
+            QBuffer buffer(&imageBytes);
+            buffer.open(QBuffer::WriteOnly);
+            image.save(&buffer, "JPG");
+            buffer.close();
+            imageBytes = imageBytes.toBase64();
+
+            const QSize imageSize = image.size().scaled(320, 320, Qt::KeepAspectRatio);
+
+            const QString json = QStringLiteral("{"
+                                                "    \"attributes\": {"
+                                                "        \"backgroundColor\": \"white\","
+                                                "        \"borderColor\": \"black\","
+                                                "        \"borderWidth\": 0,"
+                                                "        \"caption\": \"\","
+                                                "        \"captionAlignment\": \"center\","
+                                                "        \"captionColor\": \"black\","
+                                                "        \"fillBackground\": false,"
+                                                "        \"image\": \"data://base64:%1\","
+                                                "        \"opacity\": 100"
+                                                "    },"
+                                                "    \"geometry\": {"
+                                                "        \"height\": %2,"
+                                                "        \"width\": %3,"
+                                                "        \"x\": 5000,"
+                                                "        \"y\": 5000"
+                                                "    },"
+                                                "    \"type\": \"image\""
+                                                "}")
+                                         .arg(imageBytes.constData())
+                                         .arg(imageSize.height())
+                                         .arg(imageSize.width());
+            data = QJsonDocument::fromJson(json.toLatin1()).object();
+            if (className)
+                *className = QLatin1String(Annotation::staticMetaObject.className());
+        } else if (url.isValid()) {
+            const QString json = QStringLiteral("{"
+                                                "    \"attributes\": {"
+                                                "        \"url\": \"%1\""
+                                                "    },"
+                                                "    \"geometry\": {"
+                                                "        \"height\": 350,"
+                                                "        \"width\": 300,"
+                                                "        \"x\": 5000,"
+                                                "        \"y\": 5000"
+                                                "    },"
+                                                "    \"type\": \"url\""
+                                                "}")
+                                         .arg(url.toString());
+            data = QJsonDocument::fromJson(json.toLatin1()).object();
+            if (className)
+                *className = QLatin1String(Annotation::staticMetaObject.className());
+        } else if (mimeData->hasText()) {
+            const QFont font = []() {
+                QFont ret = qApp->font();
+                ret.setBold(true);
+                ret.setPointSize(24);
+                return ret;
+            }();
+            const qreal textWidth = 400;
+            const qreal textHeight = [textWidth, font, mimeData]() {
+                QTextDocument doc;
+                doc.setDefaultFont(font);
+                doc.setPlainText(mimeData->text());
+                doc.setTextWidth(textWidth);
+                return doc.size().height();
+            }();
+            const QString json = QStringLiteral("{"
+                                                "    \"attributes\": {"
+                                                "        \"backgroundColor\": \"white\","
+                                                "        \"borderColor\": \"black\","
+                                                "        \"borderWidth\": 0,"
+                                                "        \"fillBackground\": false,"
+                                                "        \"fontFamily\": \"%1\","
+                                                "        \"fontSize\": %2,"
+                                                "        \"fontStyle\": ["
+                                                "            \"bold\""
+                                                "        ],"
+                                                "        \"hAlign\": \"center\","
+                                                "        \"opacity\": 100,"
+                                                "        \"text\": \"%3\","
+                                                "        \"textColor\": \"black\","
+                                                "        \"vAlign\": \"center\""
+                                                "    },"
+                                                "    \"geometry\": {"
+                                                "        \"height\": %4,"
+                                                "        \"width\": %5,"
+                                                "        \"x\": 5000,"
+                                                "        \"y\": 5000"
+                                                "    },"
+                                                "    \"type\": \"text\""
+                                                "}")
+                                         .arg(font.family())
+                                         .arg(font.pointSize())
+                                         .arg(mimeData->text())
+                                         .arg(qCeil(textHeight))
+                                         .arg(qCeil(textWidth));
+            data = QJsonDocument::fromJson(json.toLatin1()).object();
+            if (className)
+                *className = QLatin1String(Annotation::staticMetaObject.className());
+        }
+    }
 
     return data;
 }
@@ -4082,7 +4266,7 @@ static inline QJsonObject fetchPasteDataFromClipboard(QString *className = nullp
 void Structure::paste(const QPointF &pos)
 {
     QString className;
-    const QJsonObject data = fetchPasteDataFromClipboard(&className);
+    QJsonObject data = fetchPasteDataFromClipboard(&className);
     if (data.isEmpty())
         return;
 
@@ -4220,7 +4404,7 @@ void Structure::deserializeFromJson(const QJsonObject &json)
     if (notes.isArray())
         m_notes->loadOldNotes(notes.toArray());
 
-    this->updateCharacterNamesAndTagsLater();
+    this->updateCharacterNamesShotsTransitionsAndTagsLater();
 }
 
 bool Structure::canSetPropertyFromObjectList(const QString &propName) const
@@ -4284,9 +4468,9 @@ void Structure::timerEvent(QTimerEvent *event)
         return;
     }
 
-    if (m_updateCharacterNamesTimer.timerId() == event->timerId()) {
-        m_updateCharacterNamesTimer.stop();
-        this->updateCharacterNamesAndTags();
+    if (m_updateCharacterNamesShotsTransitionsAndTagsTimer.timerId() == event->timerId()) {
+        m_updateCharacterNamesShotsTransitionsAndTagsTimer.stop();
+        this->updateCharacterNamesShotsTransitionsAndTags();
         return;
     }
 
@@ -4420,24 +4604,33 @@ void Structure::onStructureElementSceneChanged(StructureElement *element)
     connect(element->scene(), &Scene::sceneElementChanged, this, &Structure::onSceneElementChanged);
     connect(element->scene(), &Scene::aboutToRemoveSceneElement, this,
             &Structure::onAboutToRemoveSceneElement);
-    m_characterElementMap.include(element->scene()->characterElementMap());
+
+    Scene *scene = element->scene();
+    for (int i = 0; i < scene->elementCount(); i++) {
+        SceneElement *element = scene->elementAt(i);
+        if (!m_characterElementMap.include(element))
+            if (!m_transitionElementMap.include(element))
+                m_shotElementMap.include(element);
+    }
 
     this->updateLocationHeadingMapLater();
 }
 
 void Structure::onSceneElementChanged(SceneElement *element, Scene::SceneElementChangeType)
 {
-    if (m_characterElementMap.include(element))
-        updateCharacterNamesAndTagsLater();
+    if (m_characterElementMap.include(element) || m_transitionElementMap.include(element)
+        || m_shotElementMap.include(element))
+        updateCharacterNamesShotsTransitionsAndTagsLater();
 }
 
 void Structure::onAboutToRemoveSceneElement(SceneElement *element)
 {
-    if (m_characterElementMap.remove(element))
-        updateCharacterNamesAndTagsLater();
+    if (m_characterElementMap.remove(element) || m_transitionElementMap.remove(element)
+        || m_shotElementMap.remove(element))
+        updateCharacterNamesShotsTransitionsAndTagsLater();
 }
 
-void Structure::updateCharacterNamesAndTags()
+void Structure::updateCharacterNamesShotsTransitionsAndTags()
 {
     QStringList names = m_characterElementMap.characterNames();
     QSet<QString> tags;
@@ -4452,16 +4645,45 @@ void Structure::updateCharacterNamesAndTags()
         tags += QSet<QString>(ctags.begin(), ctags.end());
     }
 
-    m_characterNames = this->sortCharacterNames(names);
-    emit characterNamesChanged();
+    names = this->sortCharacterNames(names);
+    if (names != m_characterNames) {
+        m_characterNames = names;
+        emit characterNamesChanged();
+    }
 
-    m_characterTags = tags.values();
-    emit characterTagsChanged();
+    if (tags.values() != m_characterTags) {
+        m_characterTags = tags.values();
+        emit characterTagsChanged();
+    }
+
+    const QStringList shots = [=]() {
+        QSet<QString> set = m_shotElementMap.shots().toSet();
+        set += defaultShots().toSet();
+        QStringList ret = set.toList();
+        std::sort(ret.begin(), ret.end());
+        return ret;
+    }();
+    if (shots != m_shots) {
+        m_shots = shots;
+        emit shotsChanged();
+    }
+
+    const QStringList transitions = [=]() {
+        QSet<QString> set = m_transitionElementMap.transitions().toSet();
+        set += defaultTransitions().toSet();
+        QStringList ret = set.toList();
+        std::sort(ret.begin(), ret.end());
+        return ret;
+    }();
+    if (transitions != m_transitions) {
+        m_transitions = transitions;
+        emit transitionsChanged();
+    }
 }
 
-void Structure::updateCharacterNamesAndTagsLater()
+void Structure::updateCharacterNamesShotsTransitionsAndTagsLater()
 {
-    m_updateCharacterNamesTimer.start(0, this);
+    m_updateCharacterNamesShotsTransitionsAndTagsTimer.start(0, this);
 }
 
 void Structure::staticAppendAnnotation(QQmlListProperty<Annotation> *list, Annotation *ptr)
