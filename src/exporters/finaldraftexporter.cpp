@@ -1,7 +1,7 @@
 /****************************************************************************
 **
-** Copyright (C) TERIFLIX Entertainment Spaces Pvt. Ltd. Bengaluru
-** Author: Prashanth N Udupa (prashanth.udupa@teriflix.com)
+** Copyright (C) VCreate Logic Pvt. Ltd. Bengaluru
+** Author: Prashanth N Udupa (prashanth@scrite.io)
 **
 ** This code is distributed under GPL v3. Complete text of the license
 ** can be found here: https://www.gnu.org/licenses/gpl-3.0.txt
@@ -29,6 +29,15 @@ void FinalDraftExporter::setMarkLanguagesExplicitly(bool val)
 
     m_markLanguagesExplicitly = val;
     emit markLanguagesExplicitlyChanged();
+}
+
+void FinalDraftExporter::setUseScriteFonts(bool val)
+{
+    if (m_useScriteFonts == val)
+        return;
+
+    m_useScriteFonts = val;
+    emit useScriteFontsChanged();
 }
 
 bool FinalDraftExporter::doExport(QIODevice *device)
@@ -70,8 +79,8 @@ bool FinalDraftExporter::doExport(QIODevice *device)
                                        QStringLiteral("Courier Final Draft"));
                     textE.setAttribute(QStringLiteral("Language"), QStringLiteral("English"));
                 } else {
-                    const QFont font =
-                            TransliterationEngine::instance()->languageFont(item.language, false);
+                    const QFont font = TransliterationEngine::instance()->languageFont(
+                            item.language, m_useScriteFonts);
                     textE.setAttribute(QStringLiteral("Font"), font.family());
                     textE.setAttribute(
                             QStringLiteral("Language"),
@@ -137,7 +146,7 @@ bool FinalDraftExporter::doExport(QIODevice *device)
     const QStringList characters = structure->allCharacterNames();
     QDomElement charactersE = doc.createElement(QStringLiteral("Characters"));
     smartTypeE.appendChild(charactersE);
-    for (QString name : qAsConst(characters)) {
+    for (const QString &name : qAsConst(characters)) {
         QDomElement characterE = doc.createElement(QStringLiteral("Character"));
         charactersE.appendChild(characterE);
         characterE.appendChild(doc.createTextNode(name));
@@ -150,7 +159,7 @@ bool FinalDraftExporter::doExport(QIODevice *device)
     smartTypeE.appendChild(timesOfDayE);
     timesOfDayE.setAttribute(QStringLiteral("Separator"), QStringLiteral(" - "));
     std::sort(moments.begin(), moments.end());
-    for (QString moment : qAsConst(moments)) {
+    for (const QString &moment : qAsConst(moments)) {
         QDomElement timeOfDayE = doc.createElement(QStringLiteral("TimeOfDay"));
         timesOfDayE.appendChild(timeOfDayE);
         timeOfDayE.appendChild(doc.createTextNode(moment));

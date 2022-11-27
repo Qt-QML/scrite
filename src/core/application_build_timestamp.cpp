@@ -1,7 +1,7 @@
 /****************************************************************************
 **
-** Copyright (C) TERIFLIX Entertainment Spaces Pvt. Ltd. Bengaluru
-** Author: Prashanth N Udupa (prashanth.udupa@teriflix.com)
+** Copyright (C) VCreate Logic Pvt. Ltd. Bengaluru
+** Author: Prashanth N Udupa (prashanth@scrite.io)
 **
 ** This code is distributed under GPL v3. Complete text of the license
 ** can be found here: https://www.gnu.org/licenses/gpl-3.0.txt
@@ -20,8 +20,8 @@ QString Application::buildTimestamp() const
 {
     static QString ret;
     if (ret.isEmpty()) {
-        const QString dateString = QString::fromLatin1(__DATE__).simplified();
-        const QString timeString = QString::fromLatin1(__TIME__).simplified();
+        const QString dateString = QString::fromUtf8(__DATE__).simplified();
+        const QString timeString = QString::fromUtf8(__TIME__).simplified();
         const QDate date = QDate::fromString(dateString, "MMM d yyyy");
         const QTime time = QTime::fromString(timeString, "hh:mm:ss");
         ret = date.toString(QStringLiteral("yyMMdd")) + "-"

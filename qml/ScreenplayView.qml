@@ -1,7 +1,7 @@
 /****************************************************************************
 **
-** Copyright (C) TERIFLIX Entertainment Spaces Pvt. Ltd. Bengaluru
-** Author: Prashanth N Udupa (prashanth.udupa@teriflix.com)
+** Copyright (C) VCreate Logic Pvt. Ltd. Bengaluru
+** Author: Prashanth N Udupa (prashanth@scrite.io)
 **
 ** This code is distributed under GPL v3. Complete text of the license
 ** can be found here: https://www.gnu.org/licenses/gpl-3.0.txt
@@ -573,6 +573,7 @@ Item {
                 active: element !== null // && (isBreakElement || element.scene !== null)
                 enabled: !delegateDropArea.containsDrag
                 sourceComponent: Rectangle {
+                    id: elementItemBoxItem
                     color: element.scene ? Qt.tint(sceneColor, (element.selected || elementItemDelegate.active) ? "#9CFFFFFF" : "#C0FFFFFF") : sceneColor
                     border.color: color === Qt.rgba(1,1,1,1) ? "black" : sceneColor
                     border.width: elementItemDelegate.active ? 2 : 1
@@ -747,6 +748,7 @@ Item {
                         showTooltip: false
                         visible: !isBreakElement && parent.width > screenplayElementList.minimumDelegateWidthForTextVisibility
                         sceneType: elementItemDelegate.element.scene ? elementItemDelegate.element.scene.type : Scene.Standard
+                        lightBackground: Scrite.app.isLightColor(parent.color)
                     }
 
                     Image {
@@ -890,20 +892,8 @@ Item {
         }
     }
 
-
-    Menu2 {
+    ScreenplayBreakElementsContextMenu {
         id: breakElementContextMenu
-        property ScreenplayElement element
-        onClosed: element = null
-
-        MenuItem2 {
-            text: "Remove"
-            enabled: !Scrite.document.readOnly
-            onClicked: {
-                Scrite.document.screenplay.removeElement(breakElementContextMenu.element)
-                breakElementContextMenu.close()
-            }
-        }
     }
 
     ScreenplaySceneElementsContextMenu {

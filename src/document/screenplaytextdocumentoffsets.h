@@ -1,7 +1,7 @@
 /****************************************************************************
 **
-** Copyright (C) TERIFLIX Entertainment Spaces Pvt. Ltd. Bengaluru
-** Author: Prashanth N Udupa (prashanth.udupa@teriflix.com)
+** Copyright (C) VCreate Logic Pvt. Ltd. Bengaluru
+** Author: Prashanth N Udupa (prashanth@scrite.io)
 **
 ** This code is distributed under GPL v3. Complete text of the license
 ** can be found here: https://www.gnu.org/licenses/gpl-3.0.txt
@@ -28,7 +28,7 @@ class ScreenplayTextDocumentOffsets : public GenericArrayModel
     QML_ELEMENT
 
 public:
-    ScreenplayTextDocumentOffsets(QObject *parent = nullptr);
+    explicit ScreenplayTextDocumentOffsets(QObject *parent = nullptr);
     ~ScreenplayTextDocumentOffsets();
 
     Q_PROPERTY(Screenplay* screenplay READ screenplay WRITE setScreenplay NOTIFY screenplayChanged)

@@ -1,7 +1,7 @@
 /****************************************************************************
 **
-** Copyright (C) TERIFLIX Entertainment Spaces Pvt. Ltd. Bengaluru
-** Author: Prashanth N Udupa (prashanth.udupa@teriflix.com)
+** Copyright (C) VCreate Logic Pvt. Ltd. Bengaluru
+** Author: Prashanth N Udupa (prashanth@scrite.io)
 **
 ** This code is distributed under GPL v3. Complete text of the license
 ** can be found here: https://www.gnu.org/licenses/gpl-3.0.txt
@@ -31,7 +31,7 @@
 #include "errorreport.h"
 #include "transliteration.h"
 #include "systemtextinputmanager.h"
-#include "objectlistpropertymodel.h"
+#include "qobjectlistmodel.h"
 
 typedef QApplication QtApplicationClass;
 
@@ -49,11 +49,13 @@ public:
     static QVersionNumber prepare();
     static Application *instance();
 
-    Application(int &argc, char **argv, const QVersionNumber &version);
+    explicit Application(int &argc, char **argv, const QVersionNumber &version);
     ~Application();
 
     QString installationId() const;
     QDateTime installationTimestamp() const;
+
+    Q_PROPERTY(int launchCounter READ launchCounter CONSTANT)
     int launchCounter() const;
 
     Q_PROPERTY(QString buildTimestamp READ buildTimestamp CONSTANT)
@@ -69,7 +71,8 @@ public:
     int idealFontPointSize() const { return m_idealFontPointSize; }
     Q_SIGNAL void idealFontPointSizeChanged();
 
-    Q_PROPERTY(int customFontPointSize READ customFontPointSize WRITE setCustomFontPointSize NOTIFY customFontPointSizeChanged)
+    Q_PROPERTY(int customFontPointSize READ customFontPointSize WRITE setCustomFontPointSize NOTIFY
+                       customFontPointSizeChanged)
     void setCustomFontPointSize(int val);
     int customFontPointSize() const { return m_customFontPointSize; }
     Q_SIGNAL void customFontPointSizeChanged();
@@ -137,7 +140,8 @@ public:
 
     Q_INVOKABLE QString polishShortcutTextForDisplay(const QString &text) const;
 
-    Q_PROPERTY(QString baseWindowTitle READ baseWindowTitle WRITE setBaseWindowTitle NOTIFY baseWindowTitleChanged)
+    Q_PROPERTY(QString baseWindowTitle READ baseWindowTitle WRITE setBaseWindowTitle NOTIFY
+                       baseWindowTitleChanged)
     void setBaseWindowTitle(const QString &val);
     QString baseWindowTitle() const { return m_baseWindowTitle; }
     Q_SIGNAL void baseWindowTitleChanged();
@@ -152,7 +156,7 @@ public:
     Q_PROPERTY(QVersionNumber versionNumber READ versionNumber CONSTANT)
     QVersionNumber versionNumber() const { return m_versionNumber; }
 
-    Q_PROPERTY(QUndoGroup* undoGroup READ undoGroup CONSTANT)
+    Q_PROPERTY(QUndoGroup *undoGroup READ undoGroup CONSTANT)
     QUndoGroup *undoGroup() const { return m_undoGroup; }
 
     Q_INVOKABLE UndoStack *findUndoStack(const QString &objectName) const;
@@ -191,13 +195,13 @@ public:
     Q_PROPERTY(QString settingsFilePath READ settingsFilePath CONSTANT)
     QString settingsFilePath() const;
 
-    Q_PROPERTY(TransliterationEngine* transliterationEngine READ transliterationEngine CONSTANT)
+    Q_PROPERTY(TransliterationEngine *transliterationEngine READ transliterationEngine CONSTANT)
     TransliterationEngine *transliterationEngine() const
     {
         return TransliterationEngine::instance();
     }
 
-    Q_PROPERTY(SystemTextInputManager* textInputManager READ textInputManager CONSTANT)
+    Q_PROPERTY(SystemTextInputManager *textInputManager READ textInputManager CONSTANT)
     SystemTextInputManager *textInputManager() const { return SystemTextInputManager::instance(); }
 
     Q_INVOKABLE QPointF cursorPosition() const;
@@ -211,13 +215,14 @@ public:
 
     QSettings *settings() const { return m_settings; }
 
-    Q_PROPERTY(AutoUpdate* autoUpdate READ autoUpdate CONSTANT)
+    Q_PROPERTY(AutoUpdate *autoUpdate READ autoUpdate CONSTANT)
     AutoUpdate *autoUpdate() const;
 
     Q_INVOKABLE QJsonObject objectConfigurationFormInfo(const QObject *object,
                                                         const QMetaObject *from = nullptr) const;
 
-    Q_PROPERTY(QVariantList standardColors READ standardColorsVariantList NOTIFY standardColorsChanged STORED false)
+    Q_PROPERTY(QVariantList standardColors READ standardColorsVariantList NOTIFY
+                       standardColorsChanged STORED false)
     QVariantList standardColorsVariantList() const { return m_standardColors; }
     Q_SIGNAL void standardColorsChanged();
 
@@ -255,7 +260,13 @@ public:
 
     Q_INVOKABLE QScreen *windowScreen(QObject *window) const;
 
-    Q_INVOKABLE QString getEnvironmentVariable(const QString &name) const;
+    Q_INVOKABLE static QString getEnvironmentVariable(const QString &name);
+
+    Q_INVOKABLE static QString getWindowsEnvironmentVariable(const QString &name,
+                                                             const QString &defaultValue);
+    Q_INVOKABLE static void changeWindowsEnvironmentVariable(const QString &name,
+                                                             const QString &value);
+    Q_INVOKABLE static void removeWindowsEnvironmentVariable(const QString &name);
 
     Q_INVOKABLE QPointF globalMousePosition() const;
 
@@ -280,7 +291,7 @@ public:
     Q_INVOKABLE static QTime secondsToTime(int nrSeconds);
     Q_INVOKABLE static QString relativeTime(const QDateTime &dt);
 
-    Q_PROPERTY(Forms* forms READ forms CONSTANT)
+    Q_PROPERTY(Forms *forms READ forms CONSTANT)
     Forms *forms() const;
 
     // Must be called from main.cpp
@@ -302,6 +313,9 @@ public:
 
     static QString painterPathToString(const QPainterPath &val);
     static QPainterPath stringToPainterPath(const QString &val);
+    static QJsonObject replaceCharacterName(const QString &from, const QString &to,
+                                            const QJsonObject &delta,
+                                            int *nrReplacements = nullptr);
     static QString replaceCharacterName(const QString &from, const QString &to, const QString &in,
                                         int *nrReplacements = nullptr);
 
@@ -317,8 +331,8 @@ signals:
     void minimizeWindowRequest();
 
 public:
-    Q_PROPERTY(QAbstractListModel* objectReigstry READ objectRegistry CONSTANT STORED false)
-    ObjectListPropertyModel<QObject *> *objectRegistry() const
+    Q_PROPERTY(QAbstractListModel *objectReigstry READ objectRegistry CONSTANT STORED false)
+    QObjectListModel<QObject *> *objectRegistry() const
     {
         return &(const_cast<Application *>(this)->m_objectRegistry);
     }
@@ -344,7 +358,7 @@ private:
     ErrorReport *m_errorReport = new ErrorReport(this);
     QVersionNumber m_versionNumber;
     QVariantList m_standardColors;
-    ObjectListPropertyModel<QObject *> m_objectRegistry;
+    QObjectListModel<QObject *> m_objectRegistry;
     QNetworkConfigurationManager *m_networkConfiguration = nullptr;
 };
 

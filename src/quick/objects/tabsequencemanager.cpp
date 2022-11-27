@@ -1,7 +1,7 @@
 /****************************************************************************
 **
-** Copyright (C) TERIFLIX Entertainment Spaces Pvt. Ltd. Bengaluru
-** Author: Prashanth N Udupa (prashanth.udupa@teriflix.com)
+** Copyright (C) VCreate Logic Pvt. Ltd. Bengaluru
+** Author: Prashanth N Udupa (prashanth@scrite.io)
 **
 ** This code is distributed under GPL v3. Complete text of the license
 ** can be found here: https://www.gnu.org/licenses/gpl-3.0.txt
@@ -31,6 +31,15 @@ TabSequenceManager::TabSequenceManager(QObject *parent) : QObject(parent)
 TabSequenceManager::~TabSequenceManager()
 {
     qApp->removeEventFilter(this);
+}
+
+void TabSequenceManager::setEnabled(bool val)
+{
+    if (m_enabled == val)
+        return;
+
+    m_enabled = val;
+    emit enabledChanged();
 }
 
 void TabSequenceManager::setTabKey(int val)
@@ -105,6 +114,11 @@ void TabSequenceManager::setWrapAround(bool val)
     emit wrapAroundChanged();
 
     this->reworkSequenceLater();
+}
+
+QObject *TabSequenceManager::currentItemObject() const
+{
+    return m_currentItem;
 }
 
 void TabSequenceManager::assumeFocusAt(int index)
@@ -186,6 +200,15 @@ int TabSequenceManager::fetchItemIndex(int from, int direction, bool enabledOnly
     return idx;
 }
 
+void TabSequenceManager::setCurrentItem(TabSequenceItem *val)
+{
+    if (m_currentItem == val)
+        return;
+
+    m_currentItem = val;
+    emit currentItemChanged();
+}
+
 void TabSequenceManager::timerEvent(QTimerEvent *te)
 {
     if (m_timer.timerId() == te->timerId()) {
@@ -197,7 +220,7 @@ void TabSequenceManager::timerEvent(QTimerEvent *te)
 
 bool TabSequenceManager::eventFilter(QObject *watched, QEvent *event)
 {
-    if (event->type() == QEvent::KeyPress) {
+    if (m_enabled && event->type() == QEvent::KeyPress) {
         QKeyEvent *ke = static_cast<QKeyEvent *>(event);
         if (m_releaseFocusEnabled && m_releaseFocusKey == ke->key()) {
             this->releaseFocus();
@@ -312,7 +335,7 @@ TabSequenceItem::TabSequenceItem(QObject *parent) : QObject(parent), m_manager(t
 {
     QQuickItem *qmlItem = qobject_cast<QQuickItem *>(parent);
     if (qmlItem != nullptr)
-        connect(qmlItem, &QQuickItem::focusChanged, this, &TabSequenceItem::hasFocusChanged);
+        connect(qmlItem, &QQuickItem::focusChanged, this, &TabSequenceItem::onQmlItemFocusChanged);
 }
 
 TabSequenceItem::~TabSequenceItem()
@@ -417,4 +440,16 @@ void TabSequenceItem::resetManager()
 {
     m_manager = nullptr;
     emit managerChanged();
+}
+
+void TabSequenceItem::onQmlItemFocusChanged()
+{
+    emit hasFocusChanged();
+
+    if (!m_manager.isNull()) {
+        if (this->hasFocus())
+            m_manager->setCurrentItem(this);
+        else if (m_manager->m_currentItem == this)
+            m_manager->setCurrentItem(nullptr);
+    }
 }

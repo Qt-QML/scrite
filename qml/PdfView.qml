@@ -1,7 +1,7 @@
 /****************************************************************************
 **
-** Copyright (C) TERIFLIX Entertainment Spaces Pvt. Ltd. Bengaluru
-** Author: Prashanth N Udupa (prashanth.udupa@teriflix.com)
+** Copyright (C) VCreate Logic Pvt. Ltd. Bengaluru
+** Author: Prashanth N Udupa (prashanth@scrite.io)
 **
 ** This code is distributed under GPL v3. Complete text of the license
 ** can be found here: https://www.gnu.org/licenses/gpl-3.0.txt
@@ -291,12 +291,20 @@ Item {
                     height: 1
 
                     FileDialog {
-                        id: folderPathDialog
-                        folder: Scrite.app.localFileToUrl(StandardPaths.writableLocation(StandardPaths.DesktopLocation))
-                        selectFolder: true
+                        id: saveFileDialog
+                        nameFilters: ["Adobe PDF Files (*.pdf)"]
+                        folder: Scrite.app.localFileToUrl(StandardPaths.writableLocation(StandardPaths.DownloadLocation))
+                        selectFolder: false
                         selectMultiple: false
                         selectExisting: false
-                        onAccepted: saveFileButton.savePdf(Scrite.app.urlToLocalFile(folderPathDialog.folder))
+                        sidebarVisible: true
+                        dirUpAction.shortcut: "Ctrl+Shift+U" // The default Ctrl+U interfers with underline
+                        onAccepted: {
+                            const targetFilePath = Scrite.app.urlToLocalFile(saveFileDialog.fileUrl)
+                            const downloadedFilePath = Scrite.app.copyFile( Scrite.app.urlToLocalFile(pdfDoc.source), targetFilePath )
+                            if(downloadedFilePath !== "")
+                                Scrite.app.revealFileOnDesktop(downloadedFilePath)
+                        }
                     }
 
                     Menu2 {
@@ -319,7 +327,7 @@ Item {
 
                         MenuItem2 {
                             text: "Other ..."
-                            onClicked: folderPathDialog.open()
+                            onClicked: saveFileDialog.open()
                         }
                     }
                 }

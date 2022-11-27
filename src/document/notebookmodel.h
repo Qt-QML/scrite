@@ -1,7 +1,7 @@
 /****************************************************************************
 **
-** Copyright (C) TERIFLIX Entertainment Spaces Pvt. Ltd. Bengaluru
-** Author: Prashanth N Udupa (prashanth.udupa@teriflix.com)
+** Copyright (C) VCreate Logic Pvt. Ltd. Bengaluru
+** Author: Prashanth N Udupa (prashanth@scrite.io)
 **
 ** This code is distributed under GPL v3. Complete text of the license
 ** can be found here: https://www.gnu.org/licenses/gpl-3.0.txt
@@ -20,7 +20,7 @@
 #include <QSortFilterProxyModel>
 
 #include "qobjectproperty.h"
-#include "objectlistpropertymodel.h"
+#include "qobjectlistmodel.h"
 
 class Note;
 class Notes;
@@ -28,7 +28,7 @@ class Scene;
 class Character;
 class ScriteDocument;
 class BookmarkedNotes;
-class ObjectListPropertyModelBase;
+class AbstractQObjectListModel;
 
 class NotebookModel : public QStandardItemModel
 {
@@ -36,10 +36,10 @@ class NotebookModel : public QStandardItemModel
     QML_ELEMENT
 
 public:
-    NotebookModel(QObject *parent = nullptr);
+    explicit NotebookModel(QObject *parent = nullptr);
     ~NotebookModel();
 
-    Q_PROPERTY(ScriteDocument* document READ document WRITE setDocument RESET resetDocument NOTIFY documentChanged)
+    Q_PROPERTY(ScriteDocument *document READ document WRITE setDocument RESET resetDocument NOTIFY documentChanged)
     void setDocument(ScriteDocument *val);
     ScriteDocument *document() const { return m_document; }
     Q_SIGNAL void documentChanged();
@@ -76,10 +76,10 @@ public:
     Q_INVOKABLE QVariant modelIndexData(const QModelIndex &index) const;
     Q_INVOKABLE QModelIndex findModelIndexFor(QObject *owner) const;
     Q_INVOKABLE QModelIndex findModelIndexForTopLevelItem(const QString &label) const;
-    Q_INVOKABLE QModelIndex findModelIndexForCategory(ItemCategory cat) const;
+    Q_INVOKABLE QModelIndex findModelIndexForCategory(NotebookModel::ItemCategory cat) const;
     Q_INVOKABLE void refresh();
 
-    Q_PROPERTY(BookmarkedNotes* bookmarkedNotes READ bookmarkedNotes CONSTANT STORED false)
+    Q_PROPERTY(BookmarkedNotes *bookmarkedNotes READ bookmarkedNotes CONSTANT STORED false)
     BookmarkedNotes *bookmarkedNotes() const { return m_bookmarkedNotes; }
     Q_SIGNAL void bookmarkedNotesChanged();
 
@@ -120,14 +120,14 @@ private:
     BookmarkedNotes *m_bookmarkedNotes = nullptr;
 };
 
-class BookmarkedNotes : public ObjectListPropertyModel<QObject *>
+class BookmarkedNotes : public QObjectListModel<QObject *>
 {
     Q_OBJECT
     QML_ELEMENT
     QML_UNCREATABLE("Instantiation from QML not allowed.")
 
 public:
-    BookmarkedNotes(QObject *parent = nullptr);
+    explicit BookmarkedNotes(QObject *parent = nullptr);
     ~BookmarkedNotes();
 
     Q_INVOKABLE bool toggleBookmark(QObject *object);

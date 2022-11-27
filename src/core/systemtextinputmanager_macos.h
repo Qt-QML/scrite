@@ -1,7 +1,7 @@
 /****************************************************************************
 **
-** Copyright (C) TERIFLIX Entertainment Spaces Pvt. Ltd. Bengaluru
-** Author: Prashanth N Udupa (prashanth.udupa@teriflix.com)
+** Copyright (C) VCreate Logic Pvt. Ltd. Bengaluru
+** Author: Prashanth N Udupa (prashanth@scrite.io)
 **
 ** This code is distributed under GPL v3. Complete text of the license
 ** can be found here: https://www.gnu.org/licenses/gpl-3.0.txt
@@ -23,7 +23,7 @@ class SystemTextInputManagerBackend_macOS : public AbstractSystemTextInputManage
     Q_OBJECT
 
 public:
-    SystemTextInputManagerBackend_macOS(SystemTextInputManager *parent = nullptr);
+    explicit SystemTextInputManagerBackend_macOS(SystemTextInputManager *parent = nullptr);
     ~SystemTextInputManagerBackend_macOS();
 
     // AbstractSystemTextInputManagerBackend interface
@@ -45,8 +45,8 @@ class SystemTextInputSource_macOS : public AbstractSystemTextInputSource
     Q_OBJECT
 
 public:
-    SystemTextInputSource_macOS(TISInputSourceRef inputSource,
-                                SystemTextInputManager *parent = nullptr);
+    explicit SystemTextInputSource_macOS(TISInputSourceRef inputSource,
+                                         SystemTextInputManager *parent = nullptr);
     ~SystemTextInputSource_macOS();
 
     bool equals(TISInputSourceRef source) const { return m_inputSource == source; }

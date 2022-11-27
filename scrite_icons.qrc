@@ -130,8 +130,8 @@
         <file>icons/content/undo_inverted.png</file>
         <file>icons/editor/format_bold.png</file>
         <file>icons/editor/format_bold_inverted.png</file>
-        <file>icons/editor/format_ital24px.png</file>
-        <file>icons/editor/format_ital24px_inverted.png</file>
+        <file>icons/editor/format_italics.png</file>
+        <file>icons/editor/format_italics_inverted.png</file>
         <file>icons/editor/format_underline.png</file>
         <file>icons/editor/format_underline_inverted.png</file>
         <file>icons/file/backup_open.png</file>
@@ -267,5 +267,11 @@
         <file>icons/content/view_options_inverted.png</file>
         <file>icons/content/stats.png</file>
         <file>icons/content/stats_inverted.png</file>
+        <file>icons/action/pin_inverted.png</file>
+        <file>icons/action/pin.png</file>
+        <file>icons/editor/format_clear.png</file>
+        <file>icons/editor/format_clear_inverted.png</file>
+        <file>icons/content/comments_panel.png</file>
+        <file>icons/content/comments_panel_inverted.png</file>
     </qresource>
 </RCC>

@@ -1,7 +1,7 @@
 /****************************************************************************
 **
-** Copyright (C) TERIFLIX Entertainment Spaces Pvt. Ltd. Bengaluru
-** Author: Prashanth N Udupa (prashanth.udupa@teriflix.com)
+** Copyright (C) VCreate Logic Pvt. Ltd. Bengaluru
+** Author: Prashanth N Udupa (prashanth@scrite.io)
 **
 ** This code is distributed under GPL v3. Complete text of the license
 ** can be found here: https://www.gnu.org/licenses/gpl-3.0.txt
@@ -23,7 +23,7 @@ class TextExporter : public AbstractExporter
     Q_CLASSINFO("NameFilters", "Text File (*.txt)")
 
 public:
-    Q_INVOKABLE TextExporter(QObject *parent = nullptr);
+    Q_INVOKABLE explicit TextExporter(QObject *parent = nullptr);
     ~TextExporter();
 
     bool canBundleFonts() const { return false; }

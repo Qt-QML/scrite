@@ -1,7 +1,7 @@
 /****************************************************************************
 **
-** Copyright (C) TERIFLIX Entertainment Spaces Pvt. Ltd. Bengaluru
-** Author: Prashanth N Udupa (prashanth.udupa@teriflix.com)
+** Copyright (C) VCreate Logic Pvt. Ltd. Bengaluru
+** Author: Prashanth N Udupa (prashanth@scrite.io)
 **
 ** This code is distributed under GPL v3. Complete text of the license
 ** can be found here: https://www.gnu.org/licenses/gpl-3.0.txt
@@ -101,6 +101,8 @@ FocusTracker::FocusTracker(QObject *parent)
     : QObject(parent), m_item(qobject_cast<QQuickItem *>(parent)), m_window(this, "window")
 {
     ::GlobalFocusTrackerList->append(this);
+
+    connect(this, &FocusTracker::windowChanged, this, &FocusTracker::evaluateHasFocus);
 }
 
 FocusTracker::~FocusTracker()

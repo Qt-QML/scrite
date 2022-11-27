@@ -1,7 +1,7 @@
 /****************************************************************************
 **
-** Copyright (C) TERIFLIX Entertainment Spaces Pvt. Ltd. Bengaluru
-** Author: Prashanth N Udupa (prashanth.udupa@teriflix.com)
+** Copyright (C) VCreate Logic Pvt. Ltd. Bengaluru
+** Author: Prashanth N Udupa (prashanth@scrite.io)
 **
 ** This code is distributed under GPL v3. Complete text of the license
 ** can be found here: https://www.gnu.org/licenses/gpl-3.0.txt
@@ -24,7 +24,7 @@ class HtmlImporter : public AbstractImporter
     Q_CLASSINFO("NameFilters", "HTML (*.html)")
 
 public:
-    Q_INVOKABLE HtmlImporter(QObject *parent = nullptr);
+    Q_INVOKABLE explicit HtmlImporter(QObject *parent = nullptr);
     ~HtmlImporter();
 
     bool canImport(const QString &fileName) const;

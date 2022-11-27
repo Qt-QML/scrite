@@ -1,4 +1,4 @@
-QT += gui qml quick widgets xml concurrent network quickcontrols2 multimedia printsupport svg charts pdf
+QT += gui qml quick widgets xml concurrent network quickcontrols2 multimedia printsupport svg charts pdf webengine webenginewidgets
 DESTDIR = $$PWD/../Release/
 TARGET = Scrite
 
@@ -55,14 +55,15 @@ HEADERS += \
     src/automation/windowcapture.h \
     src/core/appwindow.h \
     src/core/filelocker.h \
-    src/core/objectlistpropertymodel.h \
     src/core/pdfexportablegraphicsscene.h \
+    src/core/peerapplookup.h \
     src/core/printerobject.h \
+    src/core/qobjectlistmodel.h \
     src/core/qobjectproperty.h \
     src/core/scrite.h \
     src/core/systemtextinputmanager.h \
     src/document/attachments.h \
-    src/document/characterrelationshipsgraph.h \
+    src/document/characterrelationshipgraph.h \
     src/document/form.h \
     src/document/notebookmodel.h \
     src/document/notes.h \
@@ -82,11 +83,13 @@ HEADERS += \
     src/quick/objects/announcement.h \
     src/quick/objects/colorimageprovider.h \
     src/quick/objects/completionmodel.h \
+    src/quick/objects/deltadocument.h \
     src/quick/objects/filemanager.h \
     src/quick/objects/flickscrollspeedcontrol.h \
     src/quick/objects/itempositionmapper.h \
     src/quick/objects/modelaggregator.h \
     src/quick/objects/propertyalias.h \
+    src/quick/objects/refcounter.h \
     src/quick/objects/tabsequencemanager.h \
     src/quick/objects/delayedpropertybinder.h \
     src/quick/objects/notification.h \
@@ -95,6 +98,7 @@ HEADERS += \
     src/quick/objects/eventfilter.h \
     src/quick/objects/polygontesselator.h \
     src/quick/objects/shortcutsmodel.h \
+    src/quick/objects/textdocument.h \
     src/quick/objects/trackobject.h \
     src/quick/objects/notificationmanager.h \
     src/quick/objects/materialcolors.h \
@@ -110,6 +114,7 @@ HEADERS += \
     src/quick/items/painterpathitem.h \
     src/reports/characterreport.h \
     src/reports/locationreport.h \
+    src/reports/notebookreport.h \
     src/reports/scenecharactermatrixreport.h \
     src/reports/statisticsreport.h \
     src/reports/statisticsreport_p.h \
@@ -176,13 +181,14 @@ SOURCES += \
     src/core/application_build_timestamp.cpp \
     src/core/appwindow.cpp \
     src/core/filelocker.cpp \
-    src/core/objectlistpropertymodel.cpp \
     src/core/pdfexportablegraphicsscene.cpp \
+    src/core/peerapplookup.cpp \
+    src/core/qobjectlistmodel.cpp \
     src/core/qobjectproperty.cpp \
     src/core/scrite.cpp \
     src/core/systemtextinputmanager.cpp \
     src/document/attachments.cpp \
-    src/document/characterrelationshipsgraph.cpp \
+    src/document/characterrelationshipgraph.cpp \
     src/document/form.cpp \
     src/document/notebookmodel.cpp \
     src/document/notes.cpp \
@@ -202,6 +208,7 @@ SOURCES += \
     src/quick/objects/announcement.cpp \
     src/quick/objects/colorimageprovider.cpp \
     src/quick/objects/completionmodel.cpp \
+    src/quick/objects/deltadocument.cpp \
     src/quick/objects/filemanager.cpp \
     src/quick/objects/flickscrollspeedcontrol.cpp \
     src/quick/objects/itempositionmapper.cpp \
@@ -217,6 +224,7 @@ SOURCES += \
     src/quick/objects/eventfilter.cpp \
     src/quick/objects/aggregation.cpp \
     src/quick/objects/shortcutsmodel.cpp \
+    src/quick/objects/textdocument.cpp \
     src/quick/objects/trackobject.cpp \
     src/quick/objects/materialcolors.cpp \
     src/quick/objects/errorreport.cpp \
@@ -230,6 +238,7 @@ SOURCES += \
     src/quick/items/ruleritem.cpp \
     src/reports/characterreport.cpp \
     src/reports/locationreport.cpp \
+    src/reports/notebookreport.cpp \
     src/reports/scenecharactermatrixreport.cpp \
     src/reports/statisticsreport.cpp \
     src/reports/statisticsreport_p.cpp \

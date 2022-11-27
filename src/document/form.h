@@ -1,7 +1,7 @@
 /****************************************************************************
 **
-** Copyright (C) TERIFLIX Entertainment Spaces Pvt. Ltd. Bengaluru
-** Author: Prashanth N Udupa (prashanth.udupa@teriflix.com)
+** Copyright (C) VCreate Logic Pvt. Ltd. Bengaluru
+** Author: Prashanth N Udupa (prashanth@scrite.io)
 **
 ** This code is distributed under GPL v3. Complete text of the license
 ** can be found here: https://www.gnu.org/licenses/gpl-3.0.txt
@@ -20,7 +20,7 @@
 
 #include "errorreport.h"
 #include "qobjectserializer.h"
-#include "objectlistpropertymodel.h"
+#include "qobjectlistmodel.h"
 
 class Form;
 
@@ -31,7 +31,7 @@ class FormQuestion : public QObject
     QML_UNCREATABLE("Instantiation from QML not allowed.")
 
 public:
-    FormQuestion(QObject *parent = nullptr);
+    explicit FormQuestion(QObject *parent = nullptr);
     ~FormQuestion();
     Q_SIGNAL void aboutToDelete(FormQuestion *ptr);
 
@@ -102,7 +102,7 @@ class Form : public QObject, public QObjectSerializer::Interface
     QML_UNCREATABLE("Instantiation from QML not allowed.")
 
 public:
-    Form(QObject *parent = nullptr);
+    explicit Form(QObject *parent = nullptr);
     ~Form();
     Q_SIGNAL void aboutToDelete(Form *ptr);
 
@@ -145,7 +145,7 @@ public:
     Q_SIGNAL void moreInfoUrlChanged();
 
     Q_PROPERTY(QAbstractListModel* questionsModel READ questionsModel CONSTANT STORED false)
-    ObjectListPropertyModel<FormQuestion *> *questionsModel() const;
+    QObjectListModel<FormQuestion *> *questionsModel() const;
 
     Q_INVOKABLE FormQuestion *questionAt(int index) const;
 
@@ -186,10 +186,10 @@ private:
     Type m_type = GeneralForm;
     QJsonObject m_formDataTemplate;
 
-    ObjectListPropertyModel<FormQuestion *> m_questions;
+    QObjectListModel<FormQuestion *> m_questions;
 };
 
-class Forms : public ObjectListPropertyModel<Form *>, public QObjectSerializer::Interface
+class Forms : public QObjectListModel<Form *>, public QObjectSerializer::Interface
 {
     Q_OBJECT
     Q_INTERFACES(QObjectSerializer::Interface)
@@ -199,7 +199,7 @@ class Forms : public ObjectListPropertyModel<Form *>, public QObjectSerializer::
 public:
     static Forms *global();
 
-    Forms(QObject *parent = nullptr);
+    explicit Forms(QObject *parent = nullptr);
     ~Forms();
 
     Q_PROPERTY(int formCount READ formCount NOTIFY formCountChanged)

@@ -1,7 +1,7 @@
 /****************************************************************************
 **
-** Copyright (C) TERIFLIX Entertainment Spaces Pvt. Ltd. Bengaluru
-** Author: Prashanth N Udupa (prashanth.udupa@teriflix.com)
+** Copyright (C) VCreate Logic Pvt. Ltd. Bengaluru
+** Author: Prashanth N Udupa (prashanth@scrite.io)
 **
 ** This code is distributed under GPL v3. Complete text of the license
 ** can be found here: https://www.gnu.org/licenses/gpl-3.0.txt
@@ -248,6 +248,8 @@ void ScriteDocumentVault::updateModelFromFolder()
 {
     auto fetchInfoAboutFilesInVault = [](const QString &currentDocumentId, const QString &folder,
                                          QList<MetaData> oldMetaDataList) -> QList<MetaData> {
+        Q_UNUSED(currentDocumentId);
+
         QList<MetaData> ret;
         const QFileInfoList fiList =
                 QDir(folder).entryInfoList({ QStringLiteral("*.scrite") }, QDir::Files, QDir::Time);

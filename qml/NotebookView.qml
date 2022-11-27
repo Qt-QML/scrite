@@ -1,7 +1,7 @@
 /****************************************************************************
 **
-** Copyright (C) TERIFLIX Entertainment Spaces Pvt. Ltd. Bengaluru
-** Author: Prashanth N Udupa (prashanth.udupa@teriflix.com)
+** Copyright (C) VCreate Logic Pvt. Ltd. Bengaluru
+** Author: Prashanth N Udupa (prashanth@scrite.io)
 **
 ** This code is distributed under GPL v3. Complete text of the license
 ** can be found here: https://www.gnu.org/licenses/gpl-3.0.txt
@@ -121,7 +121,7 @@ Rectangle {
 
     FontMetrics {
         id: fontMetrics
-        font.pointSize: Math.ceil(Scrite.app.idealFontPointSize*0.75)
+        font.pointSize: Scrite.app.idealFontPointSize
     }
 
     Rectangle {
@@ -179,16 +179,8 @@ Rectangle {
             ToolButton3 {
                 id: refreshButton
                 iconSource: "../icons/navigation/refresh.png"
-                ToolTip.text: "Reloads the current character relationships graph and the notebook tree."
-                property bool refreshAck: false
-                onClicked: {
-                    refreshAck = false
-                    Announcement.shout("3F96A262-A083-478C-876E-E3AFC26A0507", "refresh")
-                    if(refreshAck)
-                        Scrite.app.execLater(refreshButton, 250, function() { notebookModel.refresh() })
-                    else
-                        notebookModel.refresh()
-                }
+                ToolTip.text: "Reloads the the notebook tree."
+                onClicked: notebookModel.refresh()
                 suggestedWidth: toolButtonSize
                 suggestedHeight: toolButtonSize
             }
@@ -196,18 +188,11 @@ Rectangle {
             ToolButton3 {
                 id: pdfExportButton
                 iconSource: "../icons/file/generate_pdf.png"
-                ToolTip.text: "Export the current character relationship graph to PDF."
-                onClicked: Announcement.shout("3F96A262-A083-478C-876E-E3AFC26A0507", "pdfexport")
+                ToolTip.text: notebookContentLoader.reportDescription
+                onClicked: notebookContentLoader.generateReport()
                 suggestedWidth: toolButtonSize
                 suggestedHeight: toolButtonSize
-                property int crGraphViewCount: 0
-                enabled: crGraphViewCount > 0
-                Announcement.onIncoming: (type,data) => {
-                    const stype = ""+type
-                    const idata = 0+data
-                    if(stype === "4D37E093-1F58-4978-8060-CD6B9AD4E03C")
-                        crGraphViewCount += idata
-                }
+                enabled: notebookContentLoader.hasReport
             }
 
             Rectangle {
@@ -575,19 +560,88 @@ Rectangle {
             }
         }
 
-        Item {
+        Rectangle {
+            color: {
+                // Keep these colors in sync with actual component colors loaded
+                // by notebookContentLoader
+                if(!notebookTree.currentData)
+                    return Qt.rgba(0,0,0,0)
+
+                switch(notebookTree.currentData.notebookItemType) {
+                case NotebookModel.CategoryType:
+                    switch(notebookTree.currentData.notebookItemCategory) {
+                    case NotebookModel.ScreenplayCategory:
+                        return "white"
+                    case NotebookModel.UnusedScenesCategory:
+                    case NotebookModel.CharactersCategory:
+                        return Qt.rgba(0,0,0,0)
+                    case NotebookModel.BookmarksCategory:
+                        return Scrite.app.translucent(primaryColors.c100.background, 0.5)
+                    }
+                    break
+                case NotebookModel.NotesType:
+                    switch(notebookTree.currentData.notebookItemObject.ownerType) {
+                    case Notes.CharacterOwner: {
+                        const character = notebookTree.currentData.notebookItemObject.character
+                        return Qt.tint(character.color, "#e7ffffff")
+                        }
+                    case Notes.SceneOwner: {
+                        const notes = notebookTree.currentData.notebookItemObject
+                        const scene = notes.scene
+                        return Qt.tint(scene.color, "#e7ffffff")
+                        }
+                    default:
+                        return Scrite.app.translucent(primaryColors.c100.background, 0.5)
+                    }
+                case NotebookModel.NoteType:
+                    switch(notebookTree.currentData.notebookItemObject.type) {
+                    case Note.TextNoteType:
+                    case Note.FormNoteType:
+                        const note = notebookTree.currentData.notebookItemObject
+                        return Qt.tint(note.color, "#E7FFFFFF")
+                    }
+                    break
+                case NotebookModel.EpisodeBreakType:
+                case NotebookModel.ActBreakType:
+                    return Qt.rgba(0,0,0,0)
+                }
+
+                return Qt.rgba(0,0,0,0)
+            }
+
             Loader {
                 id: notebookContentLoader
-                active: notebookContentActiveProperty.value
+                opacity: notebookContentActiveProperty.value ? 1 : 0
                 anchors.fill: parent
+                Behavior on opacity {
+                    NumberAnimation { duration: notebookContentActiveProperty.delay-50 }
+                }
+                active: opacity > 0
 
                 property int currentNotebookItemId: notebookTree.currentData ? notebookTree.currentData.notebookItemId : -1
+
+                property bool hasReport: item && item.hasReport && item.hasReport === true
+                property string reportDescription: hasReport ? item.reportDescription : ""
+                function generateReport() {
+                    if(hasReport) {
+                        var rgen = item.createReportGenerator()
+                        if(!rgen)
+                            return
+
+                        modalDialog.closeable = false
+                        modalDialog.arguments = rgen
+                        modalDialog.sourceComponent = reportGeneratorConfigurationComponent
+                        modalDialog.popupSource = pdfExportButton
+                        modalDialog.active = true
+                    }
+                }
 
                 ResetOnChange {
                     id: notebookContentActiveProperty
                     trackChangesOn: notebookContentLoader.currentNotebookItemId
                     from: false
                     to: true
+                    delay: 250
                 }
 
                 sourceComponent: {
@@ -691,7 +745,10 @@ Rectangle {
                             Button2 {
                                 text: "Yes"
                                 focusPolicy: Qt.NoFocus
-                                onClicked: notebookContentLoader.item.deleteSelf()
+                                onClicked: {
+                                    notebookContentLoader.item.deleteSelf()
+                                    deleteConfirmationBox.active = false
+                                }
                                 visible: notebookTree.currentNote || notebookTree.currentCharacter
                             }
 
@@ -927,7 +984,7 @@ Rectangle {
                             placeholderText: "Scene Title"
                             readOnly: Scrite.document.readOnly
                             onEditingComplete: scene.structureElement.title = text
-                            tabItem: sceneSynopsisField.textArea
+                            tabItem: synopsisContentTabView.currentTabIndex === 0 ? synopsisContentTabView.currentTabItem.textArea : null
                             backTabItem: sceneHeadingField
                             font.capitalization: Font.AllUppercase
                             anchors.horizontalCenter: parent.horizontalCenter
@@ -1001,7 +1058,7 @@ Rectangle {
                                             newCharacterNameInputLoader.active = false
                                     }
                                     tabItemUponReturn: false
-                                    tabItem: sceneSynopsisField.textArea
+                                    tabItem: synopsisContentTabView.currentTabIndex === 0 ? synopsisContentTabView.currentTabItem.textArea : null
                                     backTabItem: sceneTitleField
                                     Component.onCompleted: forceActiveFocus()
                                 }
@@ -1027,33 +1084,64 @@ Rectangle {
                             }
                         }
 
-                        FlickableTextArea {
-                            id: sceneSynopsisField
+                        TabView3 {
+                            id: synopsisContentTabView
+                            tabNames: ["Synopsis", "Featured Photo"]
+                            tabColor: scene.color
+                            currentTabContent: currentTabIndex === 0 ? sceneSynopsisFieldComponent : featuredPhotoComponent
+                            currentTabIndex: screenplayEditorSettings.commentsPanelTabIndex
+                            onCurrentTabIndexChanged: screenplayEditorSettings.commentsPanelTabIndex = currentTabIndex
                             width: parent.width >= maxTextAreaSize+20 ? maxTextAreaSize : parent.width-20
-                            height: parent.height - sceneHeadingField.height - sceneTitleField.height - parent.spacing*2
-                            text: scene.title
-                            placeholderText: "Scene Synopsis"
-                            readOnly: Scrite.document.readOnly
-                            onTextChanged: scene.title = text
-                            undoRedoEnabled: true
-                            backTabItem: sceneTitleField
-                            adjustTextWidthBasedOnScrollBar: false
-                            ScrollBar.vertical: sceneSynopsisVScrollBar
+                            height: parent.height - sceneHeadingField.height - sceneTitleField.height - sceneCharactersList.height - parent.spacing*3
                             anchors.horizontalCenter: parent.horizontalCenter
-                            background: Rectangle {
-                                color: primaryColors.windowColor
-                                opacity: 0.15
+
+                            Component {
+                                id: sceneSynopsisFieldComponent
+
+                                Item {
+                                    property alias textArea: sceneSynopsisField.textArea
+
+                                    FlickableTextArea {
+                                        id: sceneSynopsisField
+                                        anchors.fill: parent
+                                        anchors.rightMargin: sceneSynopsisVScrollBar.visible ? sceneSynopsisVScrollBar.width : 0
+                                        text: scene.title
+                                        placeholderText: "Scene Synopsis"
+                                        readOnly: Scrite.document.readOnly
+                                        onTextChanged: scene.title = text
+                                        undoRedoEnabled: true
+                                        backTabItem: sceneTitleField
+                                        adjustTextWidthBasedOnScrollBar: false
+                                        ScrollBar.vertical: sceneSynopsisVScrollBar
+                                        anchors.horizontalCenter: parent.horizontalCenter
+                                        background: Rectangle {
+                                            color: primaryColors.windowColor
+                                            opacity: 0.15
+                                        }
+                                    }
+
+                                    ScrollBar2 {
+                                        id: sceneSynopsisVScrollBar
+                                        orientation: Qt.Vertical
+                                        flickable: sceneSynopsisField
+                                        anchors.top: parent.top
+                                        anchors.right: parent.right
+                                        anchors.bottom: parent.bottom
+                                    }
+                                }
+                            }
+
+                            Component {
+                                id: featuredPhotoComponent
+
+                                SceneFeaturedImage {
+                                    scene: sceneNotesItem.scene
+                                    fillModeAttrib: "notebookFillMode"
+                                    defaultFillMode: Image.PreserveAspectFit
+                                    mipmap: true
+                                }
                             }
                         }
-                    }
-
-                    ScrollBar2 {
-                        id: sceneSynopsisVScrollBar
-                        orientation: Qt.Vertical
-                        flickable: sceneSynopsisField
-                        anchors.top: parent.top
-                        anchors.right: parent.right
-                        anchors.bottom: sceneAttachments.top
                     }
 
                     AttachmentsView {
@@ -1065,8 +1153,9 @@ Rectangle {
                     }
 
                     AttachmentsDropArea2 {
-                        anchors.fill: parent
+                        id: sceneAttachmentsDropArea
                         target: scene ? scene.attachments : null
+                        anchors.fill: synopsisContentTabView.currentTabIndex === 1 ? sceneAttachments : parent
                     }
                 }
 
@@ -1192,6 +1281,25 @@ Rectangle {
             border.width: 1
             border.color: primaryColors.borderColor
 
+            // Report support
+            property bool hasReport: {
+                return notes.ownerType === Notes.StructureOwner || notes.ownerType === Notes.SceneOwner
+            }
+            property string reportDescription: {
+                switch(notes.ownerType) {
+                case Notes.StructureOwner:
+                    return "Exports all story notes into a PDF or ODT."
+                case Notes.SceneOwner:
+                    return "Exports all scene notes into a PDF or ODT."
+                }
+                return ""
+            }
+            function createReportGenerator() {
+                var generator = Scrite.document.createReportGenerator("Notebook Report")
+                generator.section = notes.owner
+                return generator
+            }
+
             Flickable {
                 id: notesFlick
                 anchors.fill: parent
@@ -1250,9 +1358,14 @@ Rectangle {
                                         wrapMode: Text.WordWrap
                                         elide: Text.ElideRight
                                         font.pointSize: Scrite.app.idealFontPointSize-2
-                                        text: objectItem.type === Note.TextNoteType ? objectItem.content : objectItem.summary
+                                        text: objectItem.type === Note.TextNoteType ? deltaDoc.plainText : objectItem.summary
                                         color: headingText.color
                                         opacity: 0.75
+
+                                        DeltaDocument {
+                                            id: deltaDoc
+                                            content: objectItem.type === Note.TextNoteType ? objectItem.content : {}
+                                        }
                                     }
                                 }
                             }
@@ -1332,6 +1445,15 @@ Rectangle {
             property Note note: componentData ? componentData.notebookItemObject : null
             color: Qt.tint(note.color, "#E7FFFFFF")
 
+            // Report support
+            property bool hasReport: true
+            property string reportDescription: "Export this text note as a PDF or ODT."
+            function createReportGenerator() {
+                var generator = Scrite.document.createReportGenerator("Notebook Report")
+                generator.section = note
+                return generator
+            }
+
             function deleteSelf() {
                 var notes = note.notes
                 notes.removeNote(note)
@@ -1353,6 +1475,15 @@ Rectangle {
             property var componentData
             property Note note: componentData.notebookItemObject
             color: Qt.tint(note.color, "#E7FFFFFF")
+
+            // Report support
+            property bool hasReport: true
+            property string reportDescription: "Export this form as a PDF or ODT."
+            function createReportGenerator() {
+                var generator = Scrite.document.createReportGenerator("Notebook Report")
+                generator.section = note
+                return generator
+            }
 
             function deleteSelf() {
                 var notes = note.notes
@@ -1485,6 +1616,15 @@ Rectangle {
         Rectangle {
             property var componentData
             property Screenplay screenplay: Scrite.document.screenplay
+
+            // Report support
+            property bool hasReport: true
+            property string reportDescription: "Export notes of all scenes in the screenplay into a PDF or ODT."
+            function createReportGenerator() {
+                var generator = Scrite.document.createReportGenerator("Notebook Report")
+                generator.section = screenplay
+                return generator
+            }
 
             FontMetrics {
                 id: screenplayFontMetrics
@@ -1809,6 +1949,16 @@ Rectangle {
         Item {
             property var componentData
 
+            // Report support
+            property bool hasReport: true
+            property string reportDescription: "Export information about all characters."
+            function createReportGenerator() {
+                var generator = Scrite.document.createReportGenerator("Notebook Report")
+                generator.section = Scrite.document.structure
+                generator.options = { "intent": "characters" }
+                return generator
+            }
+
             TextTabBar {
                 id: charactersTabBar
                 anchors.top: parent.top
@@ -1887,8 +2037,8 @@ Rectangle {
                                         width: parent.height
                                         height: parent.height
                                         source: {
-                                            if(character.photos.length > 0)
-                                                return "file:///" + character.photos[0]
+                                            if(character.hasKeyPhoto > 0)
+                                                return "file:///" + character.keyPhoto
                                             return "../icons/content/character_icon.png"
                                         }
                                         fillMode: Image.PreserveAspectCrop
@@ -2077,6 +2227,15 @@ Rectangle {
 
             signal characterDoubleClicked(string characterName)
 
+            // Report support
+            property bool hasReport: true
+            property string reportDescription: "Export character summary & notes into a PDF or ODT."
+            function createReportGenerator() {
+                var generator = Scrite.document.createReportGenerator("Notebook Report")
+                generator.section = character
+                return generator
+            }
+
             function deleteSelf() {
                 notebookModel.preferredItem = "Characters"
                 Scrite.document.structure.removeCharacter(character)
@@ -2140,10 +2299,14 @@ Rectangle {
                                 Connections {
                                     target: characterNotes
                                     function onCharacterChanged() {
-                                        Scrite.app.execLater(this, 100, function() { photoSlides.currentIndex = 0 } )
+                                        Scrite.app.execLater(this, 100, function() {
+                                            photoSlides.currentIndex = character.hasKeyPhoto ? character.keyPhotoIndex : 0
+                                        } )
                                     }
                                 }
-                                Component.onCompleted: Scrite.app.execLater(this, 100, function() { photoSlides.currentIndex = 0 } )
+                                Component.onCompleted: Scrite.app.execLater(this, 100, function() {
+                                    photoSlides.currentIndex = character.hasKeyPhoto ? character.keyPhotoIndex : 0
+                                } )
 
                                 FileDialog {
                                     id: fileDialog
@@ -2153,6 +2316,7 @@ Rectangle {
                                     sidebarVisible: true
                                     selectExisting: true
                                     folder: workspaceSettings.lastOpenPhotosFolderUrl
+                                    dirUpAction.shortcut: "Ctrl+Shift+U" // The default Ctrl+U interfers with underline
                                     onFolderChanged: workspaceSettings.lastOpenPhotosFolderUrl = folder
 
                                     onAccepted: {
@@ -2179,6 +2343,15 @@ Rectangle {
                                     clip: true
                                     ScrollBar.vertical: characterQuickInfoViewScrollBar
                                     FlickScrollSpeedControl.factor: workspaceSettings.flickScrollSpeedFactor
+
+                                    function scrollIntoView(field) {
+                                        const fy = field.mapToItem(characterQuickInfoViewContent, 0, 0).y
+                                        const fh = field.height
+                                        if(fy < contentY)
+                                            contentY = fy
+                                        else if(fy+fh > contentY+height)
+                                            contentY = fy+fh-height
+                                    }
 
                                     Column {
                                         id: characterQuickInfoViewContent
@@ -2255,6 +2428,20 @@ Rectangle {
                                                     Qt.callLater( function() { photoSlides.currentIndex = Math.min(ci,photoSlides.count-1) } )
                                                 }
                                             }
+
+                                            ToolButton3 {
+                                                anchors.top: parent.top
+                                                anchors.left: parent.left
+                                                anchors.leftMargin: parent.fillWidth ? 0 : -width
+                                                iconSource: parent.fillWidth ? "../icons/action/pin_inverted.png" : "../icons/action/pin.png"
+                                                down: photoSlides.currentIndex === character.keyPhotoIndex
+                                                onClicked: {
+                                                    if(photoSlides.currentIndex === character.keyPhotoIndex)
+                                                        character.keyPhotoIndex = 0
+                                                    else
+                                                        character.keyPhotoIndex = photoSlides.currentIndex
+                                                }
+                                            }
                                         }
 
                                         PageIndicator {
@@ -2278,6 +2465,7 @@ Rectangle {
                                             onTextEdited: character.designation = text
                                             enableTransliteration: true
                                             readOnly: Scrite.document.readOnly
+                                            onActiveFocusChanged: if(activeFocus) characterQuickInfoView.scrollIntoView(designationField)
                                         }
 
                                         Column {
@@ -2299,6 +2487,7 @@ Rectangle {
                                                 }
                                                 enableTransliteration: true
                                                 readOnly: Scrite.document.readOnly
+                                                onActiveFocusChanged: if(activeFocus) characterQuickInfoView.scrollIntoView(newTagField)
                                             }
 
                                             Flow {
@@ -2360,6 +2549,7 @@ Rectangle {
                                             }
 
                                             Slider {
+                                                id: prioritySlider
                                                 width: parent.width-10
                                                 orientation: Qt.Horizontal
                                                 from: -10
@@ -2370,6 +2560,7 @@ Rectangle {
                                                 onValueChanged: character.priority = value
                                                 TabSequenceItem.sequence: 2
                                                 TabSequenceItem.manager: characterInfoTabSequence
+                                                onActiveFocusChanged: if(activeFocus) characterQuickInfoView.scrollIntoView(prioritySlider)
                                             }
                                         }
 
@@ -2386,6 +2577,7 @@ Rectangle {
                                             onEditingComplete: character.aliases = text.split(",")
                                             enableTransliteration: true
                                             readOnly: Scrite.document.readOnly
+                                            onActiveFocusChanged: if(activeFocus) characterQuickInfoView.scrollIntoView(aliasesField)
                                         }
 
                                         Row {
@@ -2405,6 +2597,7 @@ Rectangle {
                                                 onTextEdited: character.type = text
                                                 enableTransliteration: true
                                                 readOnly: Scrite.document.readOnly
+                                                onActiveFocusChanged: if(activeFocus) characterQuickInfoView.scrollIntoView(typeField)
                                             }
 
                                             TextField2 {
@@ -2420,6 +2613,7 @@ Rectangle {
                                                 onTextEdited: character.gender = text
                                                 enableTransliteration: true
                                                 readOnly: Scrite.document.readOnly
+                                                onActiveFocusChanged: if(activeFocus) characterQuickInfoView.scrollIntoView(genderField)
                                             }
                                         }
 
@@ -2440,6 +2634,7 @@ Rectangle {
                                                 onTextEdited: character.age = text
                                                 enableTransliteration: true
                                                 readOnly: Scrite.document.readOnly
+                                                onActiveFocusChanged: if(activeFocus) characterQuickInfoView.scrollIntoView(ageField)
                                             }
 
                                             TextField2 {
@@ -2455,6 +2650,7 @@ Rectangle {
                                                 onTextEdited: character.bodyType = text
                                                 enableTransliteration: true
                                                 readOnly: Scrite.document.readOnly
+                                                onActiveFocusChanged: if(activeFocus) characterQuickInfoView.scrollIntoView(bodyTypeField)
                                             }
                                         }
 
@@ -2470,11 +2666,12 @@ Rectangle {
                                                 placeholderText: "<max 20 letters>"
                                                 maximumLength: 20
                                                 text: character.height
-                                                TabSequenceItem.sequence: 7
+                                                TabSequenceItem.sequence: 8
                                                 TabSequenceItem.manager: characterInfoTabSequence
                                                 onTextEdited: character.height = text
                                                 enableTransliteration: true
                                                 readOnly: Scrite.document.readOnly
+                                                onActiveFocusChanged: if(activeFocus) characterQuickInfoView.scrollIntoView(heightField)
                                             }
 
                                             TextField2 {
@@ -2485,11 +2682,12 @@ Rectangle {
                                                 placeholderText: "<max 20 letters>"
                                                 maximumLength: 20
                                                 text: character.weight
-                                                TabSequenceItem.sequence: 8
+                                                TabSequenceItem.sequence: 9
                                                 TabSequenceItem.manager: characterInfoTabSequence
                                                 onTextEdited: character.weight = text
                                                 enableTransliteration: true
                                                 readOnly: Scrite.document.readOnly
+                                                onActiveFocusChanged: if(activeFocus) characterQuickInfoView.scrollIntoView(weightField)
                                             }
                                         }
                                     }
@@ -2524,7 +2722,7 @@ Rectangle {
                                     target: character ? character.attachments : null
                                 }
 
-                                FlickableTextArea {
+                                RichTextEdit {
                                     id: characterSummaryField
                                     width: parent.width >= maxTextAreaSize+20 ? maxTextAreaSize : parent.width-20
                                     height: parent.height
@@ -2533,7 +2731,7 @@ Rectangle {
                                     text: character.summary
                                     onTextChanged: character.summary = text
                                     placeholderText: "Character Summary"
-                                    tabSequenceIndex: 8
+                                    tabSequenceIndex: 10
                                     tabSequenceManager: characterInfoTabSequence
                                     background: Rectangle {
                                         color: primaryColors.windowColor
@@ -2541,15 +2739,6 @@ Rectangle {
                                     }
                                     adjustTextWidthBasedOnScrollBar: false
                                     ScrollBar.vertical: characterSummaryVScrollBar
-                                }
-
-                                ScrollBar2 {
-                                    id: characterSummaryVScrollBar
-                                    orientation: Qt.Vertical
-                                    flickable: characterSummaryField
-                                    anchors.top: parent.top
-                                    anchors.right: parent.right
-                                    anchors.bottom: parent.bottom
                                 }
                             }
                         }
@@ -2616,22 +2805,6 @@ Rectangle {
                         }
                         Component.onCompleted: Scrite.app.execLater(characterTabContentArea, 100, prepare)
                         onVisibleChanged: Scrite.app.execLater(characterTabContentArea, 100, prepare)
-
-                        property bool pdfExportPossible: !graphIsEmpty && visible
-                        onPdfExportPossibleChanged: Announcement.shout("4D37E093-1F58-4978-8060-CD6B9AD4E03C", pdfExportPossible ? 1 : -1)
-                        Component.onDestruction: if(pdfExportPossible) Announcement.shout("4D37E093-1F58-4978-8060-CD6B9AD4E03C", -1)
-
-                        Announcement.onIncoming: (type,data) => {
-                            const stype = "" + type
-                            const sdata = "" + data
-                            if(stype === "3F96A262-A083-478C-876E-E3AFC26A0507") {
-                                if(sdata === "refresh") {
-                                    crGraphView.resetGraph()
-                                    refreshButton.refreshAck = true
-                                } else if(sdata == "pdfexport")
-                                    crGraphView.exportToPdf(pdfExportButton)
-                            }
-                        }
                     }
 
                     DisabledFeatureNotice {
@@ -2910,7 +3083,17 @@ Rectangle {
 
         MenuItem2 {
             text: "Delete Note"
-            onClicked: notebookContentLoader.confirmAndDelete()
+            onClicked: {
+                if(notebookTree.currentNote == noteContextMenu.note)
+                    notebookContentLoader.confirmAndDelete()
+                else {
+                    notebookView.switchTo(noteContextMenu.note)
+                    Scrite.app.execLater( notebookContentLoader, 500, () => {
+                                     notebookContentLoader.confirmAndDelete()
+                                 } )
+                }
+                noteContextMenu.close()
+            }
         }
     }
 
@@ -2945,7 +3128,17 @@ Rectangle {
 
         MenuItem2 {
             text: "Delete Character"
-            onClicked: notebookContentLoader.confirmAndDelete()
+            onClicked: {
+                if(notebookTree.currentCharacter == characterContextMenu.character)
+                    notebookContentLoader.confirmAndDelete()
+                else {
+                    notebookView.switchTo(characterContextMenu.character.notes)
+                    Scrite.app.execLater( notebookContentLoader, 100, () => {
+                                     notebookContentLoader.confirmAndDelete()
+                                 } )
+                }
+                characterContextMenu.close()
+            }
         }
     }
 
@@ -3013,5 +3206,9 @@ Rectangle {
 
             Component.onCompleted: Qt.callLater(generateStatsReport)
         }
+    }
+
+    HelpTipNotification {
+        tipName: "notebook"
     }
 }

@@ -1,7 +1,7 @@
 /****************************************************************************
 **
-** Copyright (C) TERIFLIX Entertainment Spaces Pvt. Ltd. Bengaluru
-** Author: Prashanth N Udupa (prashanth.udupa@teriflix.com)
+** Copyright (C) VCreate Logic Pvt. Ltd. Bengaluru
+** Author: Prashanth N Udupa (prashanth@scrite.io)
 **
 ** This code is distributed under GPL v3. Complete text of the license
 ** can be found here: https://www.gnu.org/licenses/gpl-3.0.txt
@@ -16,7 +16,7 @@
 
 #include "abstractexporter.h"
 
-class CharacterRelationshipsGraph;
+class CharacterRelationshipGraph;
 
 class CharacterRelationshipsGraphExporter : public AbstractExporter
 {
@@ -25,11 +25,11 @@ class CharacterRelationshipsGraphExporter : public AbstractExporter
     Q_CLASSINFO("NameFilters", "Adobe PDF (*.pdf)")
 
 public:
-    CharacterRelationshipsGraphExporter(QObject *parent = nullptr);
+    explicit CharacterRelationshipsGraphExporter(QObject *parent = nullptr);
     ~CharacterRelationshipsGraphExporter();
 
-    void setGraph(CharacterRelationshipsGraph *val);
-    CharacterRelationshipsGraph *graph() const { return m_graph; }
+    void setGraph(CharacterRelationshipGraph *val);
+    CharacterRelationshipGraph *graph() const { return m_graph; }
 
     virtual bool requiresConfiguration() const { return true; }
 
@@ -62,7 +62,7 @@ private:
     bool m_enableHeaderFooter = true;
     QString m_comment;
     QString m_watermark;
-    CharacterRelationshipsGraph *m_graph = nullptr;
+    CharacterRelationshipGraph *m_graph = nullptr;
 };
 
 #endif // CHARACTERRELATIONSHIPSGRAPHEXPORTER_H

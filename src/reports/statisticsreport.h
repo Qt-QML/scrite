@@ -1,7 +1,7 @@
 /****************************************************************************
 **
-** Copyright (C) TERIFLIX Entertainment Spaces Pvt. Ltd. Bengaluru
-** Author: Prashanth N Udupa (prashanth.udupa@teriflix.com)
+** Copyright (C) VCreate Logic Pvt. Ltd. Bengaluru
+** Author: Prashanth N Udupa (prashanth@scrite.io)
 **
 ** This code is distributed under GPL v3. Complete text of the license
 ** can be found here: https://www.gnu.org/licenses/gpl-3.0.txt
@@ -32,7 +32,7 @@ class StatisticsReport : public AbstractReportGenerator
     Q_CLASSINFO("Description", "Generate a report with key statistics of the screenplay.")
 
 public:
-    Q_INVOKABLE StatisticsReport(QObject *parent = nullptr);
+    Q_INVOKABLE explicit StatisticsReport(QObject *parent = nullptr);
     ~StatisticsReport();
 
     enum ColorGroup { Character, Location, Beat };
@@ -78,6 +78,14 @@ public:
     void setIncludeLocationPresenceGraphs(bool val);
     bool isIncludeLocationPresenceGraphs() const { return m_includeLocationPresenceGraphs; }
     Q_SIGNAL void includeLocationPresenceGraphsChanged();
+
+    Q_CLASSINFO("considerPreferredGroupCategoryOnly_FieldGroup", "Basic")
+    Q_CLASSINFO("considerPreferredGroupCategoryOnly_FieldLabel", "Consider Preferred Group Category Only.")
+    Q_CLASSINFO("considerPreferredGroupCategoryOnly_FieldEditor", "CheckBox")
+    Q_PROPERTY(bool considerPreferredGroupCategoryOnly READ isConsiderPreferredGroupCategoryOnly WRITE setConsiderPreferredGroupCategoryOnly NOTIFY considerPreferredGroupCategoryOnlyChanged)
+    void setConsiderPreferredGroupCategoryOnly(bool val);
+    bool isConsiderPreferredGroupCategoryOnly() const;
+    Q_SIGNAL void considerPreferredGroupCategoryOnlyChanged();
 
     Q_CLASSINFO("maxLocationPresenceGraphs_FieldGroup", "Locations")
     Q_CLASSINFO("maxLocationPresenceGraphs_FieldLabel", "Maximum Number Of Locations")
@@ -228,6 +236,7 @@ private:
     QStringList m_characterNames;
     bool m_includeLocationPresenceGraphs = true;
     bool m_includeCharacterPresenceGraphs = true;
+    bool m_considerPreferredGroupCategoryOnly = true;
 };
 
 #endif // STATISTICSREPORT_H

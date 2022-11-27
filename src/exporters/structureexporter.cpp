@@ -1,7 +1,7 @@
 /****************************************************************************
 **
-** Copyright (C) TERIFLIX Entertainment Spaces Pvt. Ltd. Bengaluru
-** Author: Prashanth N Udupa (prashanth.udupa@teriflix.com)
+** Copyright (C) VCreate Logic Pvt. Ltd. Bengaluru
+** Author: Prashanth N Udupa (prashanth@scrite.io)
 **
 ** This code is distributed under GPL v3. Complete text of the license
 ** can be found here: https://www.gnu.org/licenses/gpl-3.0.txt
@@ -23,7 +23,12 @@
 #include <QPainterPath>
 #include <QAbstractTextDocumentLayout>
 
-StructureExporter::StructureExporter(QObject *parent) : AbstractExporter(parent) { }
+StructureExporter::StructureExporter(QObject *parent) : AbstractExporter(parent)
+{
+    const ScriteDocument *doc = ScriteDocument::instance();
+    const Structure *structure = doc->structure();
+    this->setPreferFeaturedImage(structure->indexCardContent() == Structure::FeaturedPhoto);
+}
 
 StructureExporter::~StructureExporter() { }
 
@@ -43,6 +48,15 @@ void StructureExporter::setEnableHeaderFooter(bool val)
 
     m_enableHeaderFooter = val;
     emit enableHeaderFooterChanged();
+}
+
+void StructureExporter::setPreferFeaturedImage(bool val)
+{
+    if (m_preferFeaturedImage == val)
+        return;
+
+    m_preferFeaturedImage = val;
+    emit preferFeaturedImageChanged();
 }
 
 void StructureExporter::setWatermark(const QString &val)

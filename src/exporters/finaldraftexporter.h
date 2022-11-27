@@ -1,7 +1,7 @@
 /****************************************************************************
 **
-** Copyright (C) TERIFLIX Entertainment Spaces Pvt. Ltd. Bengaluru
-** Author: Prashanth N Udupa (prashanth.udupa@teriflix.com)
+** Copyright (C) VCreate Logic Pvt. Ltd. Bengaluru
+** Author: Prashanth N Udupa (prashanth@scrite.io)
 **
 ** This code is distributed under GPL v3. Complete text of the license
 ** can be found here: https://www.gnu.org/licenses/gpl-3.0.txt
@@ -23,7 +23,7 @@ class FinalDraftExporter : public AbstractExporter
     Q_CLASSINFO("NameFilters", "Final Draft (*.fdx)")
 
 public:
-    Q_INVOKABLE FinalDraftExporter(QObject *parent = nullptr);
+    Q_INVOKABLE explicit FinalDraftExporter(QObject *parent = nullptr);
     ~FinalDraftExporter();
 
     Q_CLASSINFO("markLanguagesExplicitly_FieldLabel", "Explicity mark text-fragments of different languages.")
@@ -32,6 +32,14 @@ public:
     void setMarkLanguagesExplicitly(bool val);
     bool isMarkLanguagesExplicitly() const { return m_markLanguagesExplicitly; }
     Q_SIGNAL void markLanguagesExplicitlyChanged();
+
+    Q_CLASSINFO("useScriteFonts_FieldLabel", "Use language fonts as specified in Settings > Fonts panel.")
+    Q_CLASSINFO("useScriteFonts_FieldNote", "Please make sure that the font selected in Settings > Fonts panel is instaled in your computer and is available for all users.")
+    Q_CLASSINFO("useScriteFonts_FieldEditor", "CheckBox")
+    Q_PROPERTY(bool useScriteFonts READ isUseScriteFonts WRITE setUseScriteFonts NOTIFY useScriteFontsChanged)
+    void setUseScriteFonts(bool val);
+    bool isUseScriteFonts() const { return m_useScriteFonts; }
+    Q_SIGNAL void useScriteFontsChanged();
 
     bool canBundleFonts() const { return false; }
     bool requiresConfiguration() const { return true; }
@@ -46,6 +54,7 @@ private:
 #else
     bool m_markLanguagesExplicitly = true;
 #endif
+    bool m_useScriteFonts = false;
 };
 
 #endif // FINALDRAFTEXPORTER_H

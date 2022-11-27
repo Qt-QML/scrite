@@ -1,7 +1,7 @@
 /****************************************************************************
 **
-** Copyright (C) TERIFLIX Entertainment Spaces Pvt. Ltd. Bengaluru
-** Author: Prashanth N Udupa (prashanth.udupa@teriflix.com)
+** Copyright (C) VCreate Logic Pvt. Ltd. Bengaluru
+** Author: Prashanth N Udupa (prashanth@scrite.io)
 **
 ** This code is distributed under GPL v3. Complete text of the license
 ** can be found here: https://www.gnu.org/licenses/gpl-3.0.txt
@@ -86,6 +86,20 @@ void StatisticsReport::setIncludeLocationPresenceGraphs(bool val)
 
     m_includeLocationPresenceGraphs = val;
     emit includeLocationPresenceGraphsChanged();
+}
+
+void StatisticsReport::setConsiderPreferredGroupCategoryOnly(bool val)
+{
+    if (m_considerPreferredGroupCategoryOnly == val)
+        return;
+
+    m_considerPreferredGroupCategoryOnly = val;
+    emit considerPreferredGroupCategoryOnlyChanged();
+}
+
+bool StatisticsReport::isConsiderPreferredGroupCategoryOnly() const
+{
+    return m_considerPreferredGroupCategoryOnly;
 }
 
 void StatisticsReport::setMaxLocationPresenceGraphs(int val)

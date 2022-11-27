@@ -1,7 +1,7 @@
 /****************************************************************************
 **
-** Copyright (C) TERIFLIX Entertainment Spaces Pvt. Ltd. Bengaluru
-** Author: Prashanth N Udupa (prashanth.udupa@teriflix.com)
+** Copyright (C) VCreate Logic Pvt. Ltd. Bengaluru
+** Author: Prashanth N Udupa (prashanth@scrite.io)
 **
 ** This code is distributed under GPL v3. Complete text of the license
 ** can be found here: https://www.gnu.org/licenses/gpl-3.0.txt
@@ -497,14 +497,19 @@ QGraphicsRectItem *StatisticsReportTimeline::createScreenplayTracks(const Statis
         return overlappingTracks.last();
     };
 
+    const QString activeGroupPrefix =
+            report->document()->structure()->preferredGroupCategory() + QLatin1String("/");
     for (auto sceneElement : sceneElements) {
         ++currentSceneIndex;
         const Scene *scene = sceneElement->scene();
         const qreal pixelLength = report->pixelLength(sceneElement);
 
         const QStringList tags = scene->groups();
-        for (const QString &tag : tags)
-            addBeatTrack(tag, pixelLength);
+        for (const QString &tag : tags) {
+            if (!report->isConsiderPreferredGroupCategoryOnly()
+                || tag.startsWith(activeGroupPrefix, Qt::CaseInsensitive))
+                addBeatTrack(tag, pixelLength);
+        }
 
         currentPixel += pixelLength;
     }

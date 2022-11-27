@@ -1,7 +1,7 @@
 /****************************************************************************
 **
-** Copyright (C) TERIFLIX Entertainment Spaces Pvt. Ltd. Bengaluru
-** Author: Prashanth N Udupa (prashanth.udupa@teriflix.com)
+** Copyright (C) VCreate Logic Pvt. Ltd. Bengaluru
+** Author: Prashanth N Udupa (prashanth@scrite.io)
 **
 ** This code is distributed under GPL v3. Complete text of the license
 ** can be found here: https://www.gnu.org/licenses/gpl-3.0.txt
@@ -13,12 +13,16 @@
 
 #include "user.h"
 #include "hourglass.h"
+#include "appwindow.h"
 #include "application.h"
 #include "timeprofiler.h"
+#include "scritedocument.h"
 #include "transliteration.h"
+#include "spellcheckservice.h"
 #include "systemtextinputmanager.h"
 #include "3rdparty/sonnet/sonnet/src/core/textbreaks_p.h"
 
+#include <QTimer>
 #include <QPainter>
 #include <QMetaEnum>
 #include <QSettings>
@@ -31,8 +35,8 @@
 #include <QFontDatabase>
 #include <QtConcurrentRun>
 #include <QQuickTextDocument>
-#include <QAbstractTextDocumentLayout>
 #include <QTextBoundaryFinder>
+#include <QAbstractTextDocumentLayout>
 
 #include <PhTranslateLib>
 
@@ -75,25 +79,26 @@ TransliterationEngine *TransliterationEngine::instance(QCoreApplication *app)
 
 TransliterationEngine::TransliterationEngine(QObject *parent) : QObject(parent)
 {
-    const QMetaObject *mo = this->metaObject();
-    const QMetaEnum metaEnum = mo->enumerator(mo->indexOfEnumerator("Language"));
+    const QMetaObject *mo = &TransliterationEngine::staticMetaObject;
+    const QMetaEnum languageEnum = mo->enumerator(mo->indexOfEnumerator("Language"));
     const QStringList customFontPaths = ::getCustomFontFilePaths();
     for (const QString &customFont : customFontPaths) {
         const int id = QFontDatabase::addApplicationFont(customFont);
         const QString language = customFont.split("/", Qt::SkipEmptyParts).at(2);
-        Language lang = Language(metaEnum.keyToValue(qPrintable(language)));
+        const QStringList appFontFamilies = QFontDatabase::applicationFontFamilies(id);
+        Language lang = Language(languageEnum.keyToValue(qPrintable(language)));
         m_languageBundledFontId[lang] = id;
-        m_languageFontFamily[lang] = QFontDatabase::applicationFontFamilies(id).first();
+        m_languageFontFamily[lang] = appFontFamilies.first();
         m_languageFontFilePaths[lang].append(customFont);
     }
 
     const QSettings *settings = Application::instance()->settings();
 
-    for (int i = 0; i < metaEnum.keyCount(); i++) {
-        Language lang = Language(metaEnum.value(i));
+    for (int i = 0; i < languageEnum.keyCount(); i++) {
+        Language lang = Language(languageEnum.value(i));
         m_activeLanguages[lang] = false;
 
-        const QString langStr = QString::fromLatin1(metaEnum.key(i));
+        const QString langStr = QString::fromLatin1(languageEnum.key(i));
 
         const QString sfontKey =
                 QStringLiteral("Transliteration/") + langStr + QStringLiteral("_Font");
@@ -117,7 +122,7 @@ TransliterationEngine::TransliterationEngine(QObject *parent) : QObject(parent)
     } else {
         for (const QString &lang : activeLanguages) {
             bool ok = false;
-            int val = metaEnum.keyToValue(qPrintable(lang.trimmed()), &ok);
+            int val = languageEnum.keyToValue(qPrintable(lang.trimmed()), &ok);
             m_activeLanguages[Language(val)] = true;
         }
     }
@@ -126,10 +131,57 @@ TransliterationEngine::TransliterationEngine(QObject *parent) : QObject(parent)
     Language lang = English;
     if (!currentLanguage.isEmpty()) {
         bool ok = false;
-        int val = metaEnum.keyToValue(qPrintable(currentLanguage), &ok);
+        int val = languageEnum.keyToValue(qPrintable(currentLanguage), &ok);
         lang = Language(val);
     }
     this->setLanguage(lang);
+}
+
+void TransliterationEngine::setEnabledLanguages(const QList<int> &val)
+{
+    if (m_enabledLanguages == val)
+        return;
+
+    m_enabledLanguages = val;
+    emit enabledLanguagesChanged();
+}
+
+void TransliterationEngine::determineEnabledLanguages()
+{
+    const QMetaObject *mo = &TransliterationEngine::staticMetaObject;
+    const QMetaEnum languageEnum = mo->enumerator(mo->indexOfEnumerator("Language"));
+
+    QQuickItem *focusItem =
+            AppWindow::instance() ? AppWindow::instance()->activeFocusItem() : nullptr;
+    TransliterationHints *hints = TransliterationHints::find(focusItem);
+    TransliterationHints::AllowedMechanisms mechanisms = TransliterationHints::AllMechanisms;
+    if (hints)
+        mechanisms = hints->allowedMechanisms();
+
+    QList<int> languages;
+    if (mechanisms == TransliterationHints::NoMechanism) {
+        this->setEnabledLanguages(languages);
+        return;
+    }
+
+    for (int i = 0; i < languageEnum.keyCount(); i++) {
+        Language lang = Language(languageEnum.value(i));
+        if (lang == TransliterationEngine::English
+            || mechanisms.testFlag(TransliterationHints::StaticMechanism))
+            languages.append(lang);
+        else if (mechanisms.testFlag(TransliterationHints::TextInputSourceMechanism)) {
+            const QString tisId = m_tisMap.value(lang);
+            const AbstractSystemTextInputSource *tis =
+                    SystemTextInputManager::instance()->findSourceById(tisId);
+            if (tis != nullptr)
+                languages.append(lang);
+        }
+    }
+
+    this->setEnabledLanguages(languages);
+
+    if (!languages.contains(m_language))
+        this->setLanguage(English);
 }
 
 TransliterationEngine::~TransliterationEngine() { }
@@ -768,9 +820,8 @@ TransliterationEngine::evaluateBoundaries(const QString &text,
     QTextBoundaryFinder boundaryFinder(QTextBoundaryFinder::Word, text);
     while (boundaryFinder.position() < text.length()) {
         if (!(boundaryFinder.boundaryReasons().testFlag(QTextBoundaryFinder::StartOfItem))) {
-            if (boundaryFinder.toNextBoundary() == -1) {
+            if (boundaryFinder.toNextBoundary() == -1)
                 break;
-            }
             continue;
         }
 
@@ -849,9 +900,38 @@ TransliterationEngine::evaluateBoundaries(const QString &text,
         }
     }
 
-    // TODO: break apart a single boundary if it combines two distinct languages
-    // But, we won't do that now. Its rather rare that users will write a single word in
-    // two separate languages.
+    for (int i = ret.size() - 1; i >= 0; i--) {
+        Boundary &b = ret[i];
+        const QSet<QChar::Script> scripts = [](const QString &text) -> QSet<QChar::Script> {
+            QSet<QChar::Script> ret;
+            for (const QChar &ch : text) {
+                if (ch.script() != QChar::Script_Common)
+                    ret += ch.script();
+            }
+            return ret;
+        }(b.string);
+
+        if (scripts.size() <= 1 || b.string.length() <= 1)
+            continue;
+
+        QChar::Script script = TransliterationEngine::scriptForLanguage(b.language);
+        for (int j = b.end; j >= b.start; j--) {
+            const QChar ch = b.string.at(j - b.start);
+            if (ch.script() == QChar::Script_Common || ch.script() == QChar::Script_Inherited)
+                continue;
+
+            if (ch.script() != script) {
+                Boundary b2;
+                b2.start = j + 1;
+                b2.end = b.end;
+                b2.evalStringLanguageAndFont(text);
+                ret.insert(i + 1, b2);
+                b.end = j;
+                b.evalStringLanguageAndFont(text);
+                script = ch.script();
+            }
+        }
+    }
 
     return ret;
 }
@@ -859,6 +939,7 @@ TransliterationEngine::evaluateBoundaries(const QString &text,
 void TransliterationEngine::evaluateBoundariesAndInsertText(QTextCursor &cursor,
                                                             const QString &text) const
 {
+#if 0
     const int beginPosition = cursor.position();
     cursor.insertText(text);
     const int endPosition = cursor.position();
@@ -878,6 +959,22 @@ void TransliterationEngine::evaluateBoundariesAndInsertText(QTextCursor &cursor,
     }
 
     cursor.setPosition(endPosition);
+#else
+    const QTextCharFormat defaultFormat = cursor.charFormat();
+
+    const QList<TransliterationEngine::Boundary> items = this->evaluateBoundaries(text);
+    for (const TransliterationEngine::Boundary &item : items) {
+        if (item.isEmpty())
+            continue;
+
+        QTextCharFormat format = defaultFormat;
+        if (item.language == TransliterationEngine::English)
+            format.setFontFamily(cursor.document()->defaultFont().family());
+        else
+            format.setFontFamily(item.font.family());
+        cursor.insertText(item.string, format);
+    }
+#endif
 }
 
 QChar::Script TransliterationEngine::determineScript(const QString &val)
@@ -911,7 +1008,107 @@ QString TransliterationEngine::formattedHtmlOf(const QString &text) const
     return html;
 }
 
+int TransliterationEngine::wordCount(const QString &text)
+{
+    int wordCount = 0;
+
+    QTextBoundaryFinder boundaryFinder(QTextBoundaryFinder::Word, text);
+    while (boundaryFinder.position() < text.length()) {
+        QTextBoundaryFinder::BoundaryReasons reasons = boundaryFinder.boundaryReasons();
+        if (!(reasons.testFlag(QTextBoundaryFinder::StartOfItem))
+            || reasons.testFlag(QTextBoundaryFinder::SoftHyphen)) {
+            if (boundaryFinder.toNextBoundary() == -1)
+                break;
+            continue;
+        }
+
+        ++wordCount;
+        boundaryFinder.toNextBoundary();
+    }
+
+    return wordCount;
+}
+
 ///////////////////////////////////////////////////////////////////////////////
+
+class FontSyntaxHighlighterUserData : public QTextBlockUserData
+{
+public:
+    enum { Type = 1003 };
+    const int type = Type;
+
+    static FontSyntaxHighlighterUserData *create(QTextBlock &block,
+                                                 FontSyntaxHighlighter *highlighter);
+    static FontSyntaxHighlighterUserData *get(const QTextBlock &block);
+    explicit FontSyntaxHighlighterUserData(const QTextBlock &block,
+                                           FontSyntaxHighlighter *highlighter)
+        : m_block(block), m_highlighter(highlighter)
+    {
+    }
+
+    ~FontSyntaxHighlighterUserData() { delete m_spellCheck; }
+
+    void scheduleSpellCheckIfRequired(const QString &text)
+    {
+        if (!m_spellCheck || m_spellCheck->text() != text)
+            this->scheduleSpellCheck();
+    }
+
+    void scheduleSpellCheck()
+    {
+        if (m_spellCheck == nullptr) {
+            m_spellCheck = new SpellCheckService;
+            QObject::connect(m_spellCheck, &SpellCheckService::misspelledFragmentsChanged,
+                             m_highlighter, [=]() {
+                                 m_highlighter->rehighlightBlock(m_block);
+                                 m_highlighter->checkForSpellingMistakeInCurrentWord();
+                             });
+        }
+
+        m_spellCheck->setText(m_block.text());
+        m_spellCheck->scheduleUpdate();
+    }
+
+    QString spellCheckedText() const { return m_spellCheck->text(); }
+
+    QList<TextFragment> misspelledFragments() const
+    {
+        return m_spellCheck ? m_spellCheck->misspelledFragments() : QList<TextFragment>();
+    }
+
+private:
+    QTextBlock m_block;
+    FontSyntaxHighlighter *m_highlighter = nullptr;
+    SpellCheckService *m_spellCheck = nullptr;
+};
+
+FontSyntaxHighlighterUserData *
+FontSyntaxHighlighterUserData::create(QTextBlock &block, FontSyntaxHighlighter *highlighter)
+{
+    QTextBlockUserData *userData = block.userData();
+    if (userData == nullptr) {
+        userData = new FontSyntaxHighlighterUserData(block, highlighter);
+        block.setUserData(userData);
+    }
+
+    FontSyntaxHighlighterUserData *ret =
+            reinterpret_cast<FontSyntaxHighlighterUserData *>(userData);
+    if (ret->type != FontSyntaxHighlighterUserData::Type) {
+        qDebug() << "PA: Trouble!!!";
+    }
+    return ret;
+}
+
+FontSyntaxHighlighterUserData *FontSyntaxHighlighterUserData::get(const QTextBlock &block)
+{
+    QTextBlockUserData *userData = block.userData();
+    if (userData == nullptr)
+        return nullptr;
+
+    FontSyntaxHighlighterUserData *ret =
+            reinterpret_cast<FontSyntaxHighlighterUserData *>(userData);
+    return (ret->type == FontSyntaxHighlighterUserData::Type) ? ret : nullptr;
+}
 
 FontSyntaxHighlighter::FontSyntaxHighlighter(QObject *parent) : QSyntaxHighlighter(parent)
 {
@@ -933,15 +1130,130 @@ FontSyntaxHighlighter::FontSyntaxHighlighter(QObject *parent) : QSyntaxHighlight
 
 FontSyntaxHighlighter::~FontSyntaxHighlighter() { }
 
+void FontSyntaxHighlighter::setEnforceDefaultFont(bool val)
+{
+    if (m_enforceDefaultFont == val)
+        return;
+
+    m_enforceDefaultFont = val;
+    emit enforceDefaultFontChanged();
+
+    this->rehighlight();
+}
+
+void FontSyntaxHighlighter::setEnforceHeadingFontSize(bool val)
+{
+    if (m_enforceHeadingFontSize == val)
+        return;
+
+    m_enforceHeadingFontSize = val;
+    emit enforceHeadingFontSizeChanged();
+}
+
+void FontSyntaxHighlighter::setSpellCheckEnabled(bool val)
+{
+    if (m_spellCheckEnabled == val)
+        return;
+
+    m_spellCheckEnabled = val;
+    emit spellCheckEnabledChanged();
+
+    QTextBlock block = this->document()->firstBlock();
+
+    while (block.isValid()) {
+        if (m_spellCheckEnabled) {
+            FontSyntaxHighlighterUserData *ud = FontSyntaxHighlighterUserData::create(block, this);
+            ud->scheduleSpellCheck();
+        } else {
+            FontSyntaxHighlighterUserData *ud = FontSyntaxHighlighterUserData::get(block);
+            if (ud) {
+                block.setUserData(nullptr);
+                delete ud;
+            }
+        }
+
+        block = block.next();
+    }
+
+    if (m_spellCheckEnabled)
+        connect(this->document(), &QTextDocument::contentsChange, this,
+                &FontSyntaxHighlighter::onContentsChange);
+    else
+        disconnect(this->document(), &QTextDocument::contentsChange, this,
+                   &FontSyntaxHighlighter::onContentsChange);
+}
+
+void FontSyntaxHighlighter::setCursorPosition(int val)
+{
+    if (m_cursorPosition == val)
+        return;
+
+    m_cursorPosition = val;
+    emit cursorPositionChanged();
+
+    this->checkForSpellingMistakeInCurrentWord();
+}
+
+QStringList FontSyntaxHighlighter::spellingSuggestionsForWordAt(int cursorPosition) const
+{
+    TextFragment fragment;
+    if (!this->findMisspelledTextFragment(cursorPosition, fragment))
+        return QStringList();
+
+    return fragment.suggestions();
+}
+
+void FontSyntaxHighlighter::replaceWordAt(int cursorPosition, const QString &with)
+{
+    QTextCursor cursor(this->document());
+    FontSyntaxHighlighterUserData *ud = nullptr;
+
+    if (!this->wordCursor(cursorPosition, cursor, ud))
+        return;
+
+    cursor.insertText(with);
+    ud->scheduleSpellCheck();
+}
+
+void FontSyntaxHighlighter::addWordAtPositionToDictionary(int cursorPosition)
+{
+    QTextCursor cursor(this->document());
+    FontSyntaxHighlighterUserData *ud = nullptr;
+
+    if (!this->wordCursor(cursorPosition, cursor, ud))
+        return;
+
+    const QString word = cursor.selectedText();
+
+    if (SpellCheckService::addToDictionary(word))
+        ud->scheduleSpellCheck();
+}
+
+void FontSyntaxHighlighter::addWordAtPositionToIgnoreList(int cursorPosition)
+{
+    QTextCursor cursor(this->document());
+    FontSyntaxHighlighterUserData *ud = nullptr;
+
+    if (!this->wordCursor(cursorPosition, cursor, ud))
+        return;
+
+    const QString word = cursor.selectedText();
+    ScriteDocument::instance()->addToSpellCheckIgnoreList(word);
+
+    ud->scheduleSpellCheck();
+}
+
 void FontSyntaxHighlighter::highlightBlock(const QString &text)
 {
-    const QTextDocument *doc = this->document();
-    const QFont defaultFont = doc->defaultFont();
-    const QTextBlock block = this->QSyntaxHighlighter::currentBlock();
+    if (m_enforceDefaultFont) {
+        const QTextDocument *doc = this->document();
+        const QFont defaultFont = doc->defaultFont();
+        const QTextBlock block = this->QSyntaxHighlighter::currentBlock();
 
-    QTextCharFormat defaultFormat;
-    defaultFormat.setFont(defaultFont);
-    this->setFormat(0, block.length(), defaultFormat);
+        QTextCharFormat defaultFormat;
+        defaultFormat.setFont(defaultFont);
+        this->setFormat(0, block.length(), defaultFormat);
+    }
 
     // Per-language fonts.
     const QList<TransliterationEngine::Boundary> boundaries =
@@ -954,6 +1266,149 @@ void FontSyntaxHighlighter::highlightBlock(const QString &text)
         QTextCharFormat format = this->QSyntaxHighlighter::format(boundary.start);
         format.setFontFamily(boundary.font.family());
         this->setFormat(boundary.start, boundary.end - boundary.start + 1, format);
+    }
+
+    if (m_enforceHeadingFontSize) {
+        const QTextBlock block = this->currentBlock();
+        const int headingLevel = block.blockFormat().headingLevel();
+
+        const QFont font = this->document()->defaultFont();
+        const int fontSize = headingLevel == 0 ? font.pointSize()
+                                               : font.pointSize() + qMax(0, 8 - 2 * headingLevel);
+        for (int i = 0; i < block.length(); i++) {
+            QTextCharFormat charFormat = this->format(i);
+            charFormat.setFontPointSize(fontSize);
+            charFormat.setFontWeight(headingLevel == 0 ? QFont::Normal : QFont::Bold);
+            this->setFormat(i, 1, charFormat);
+        }
+    }
+
+    // Spelling mistakes.
+    if (m_spellCheckEnabled) {
+        const QTextBlock block = this->QSyntaxHighlighter::currentBlock();
+        const FontSyntaxHighlighterUserData *ud = FontSyntaxHighlighterUserData::get(block);
+        const QList<TextFragment> fragments =
+                ud ? ud->misspelledFragments() : QList<TextFragment>();
+        if (!fragments.isEmpty()) {
+            for (const TextFragment &fragment : fragments) {
+                if (!fragment.isValid())
+                    continue;
+
+                const QString word = text.mid(fragment.start(), fragment.length());
+                const QChar::Script script = TransliterationEngine::determineScript(word);
+                if (script != QChar::Script_Latin)
+                    continue;
+
+                QTextCharFormat spellingErrorFormat = this->format(fragment.start());
+#if 0
+                spellingErrorFormat.setUnderlineStyle(QTextCharFormat::SpellCheckUnderline);
+                spellingErrorFormat.setUnderlineColor(Qt::red);
+                spellingErrorFormat.setFontUnderline(true);
+#else
+                spellingErrorFormat.setBackground(QColor(255, 0, 0, 32));
+#endif
+                this->setFormat(fragment.start(), fragment.length(), spellingErrorFormat);
+            }
+
+            emit spellingMistakesDetected();
+        }
+    }
+}
+
+void FontSyntaxHighlighter::onContentsChange(int position, int charsRemoved, int charsAdded)
+{
+    Q_UNUSED(position)
+    Q_UNUSED(charsRemoved)
+    Q_UNUSED(charsAdded)
+
+    if (m_spellCheckEnabled) {
+        QTextBlock block = this->document()->firstBlock();
+        while (block.isValid()) {
+            FontSyntaxHighlighterUserData *ud = FontSyntaxHighlighterUserData::create(block, this);
+            ud->scheduleSpellCheckIfRequired(block.text());
+            block = block.next();
+        }
+    }
+}
+
+void FontSyntaxHighlighter::setWordUnderCursorIsMisspelled(bool val)
+{
+    if (m_wordUnderCursorIsMisspelled == val)
+        return;
+
+    m_wordUnderCursorIsMisspelled = val;
+    emit wordUnderCursorIsMisspelledChanged();
+}
+
+void FontSyntaxHighlighter::setSpellingSuggestionsForWordUnderCursor(const QStringList &val)
+{
+    if (m_spellingSuggestions == val)
+        return;
+
+    m_spellingSuggestions = val;
+    emit spellingSuggestionsForWordUnderCursorChanged();
+}
+
+bool FontSyntaxHighlighter::wordCursor(int cursorPosition, QTextCursor &cursor,
+                                       FontSyntaxHighlighterUserData *&ud) const
+{
+    ud = nullptr;
+
+    if (cursorPosition < 0)
+        return false;
+
+    cursor = QTextCursor(this->document());
+    cursor.movePosition(QTextCursor::End);
+    if (cursorPosition > cursor.position())
+        return false;
+
+    FontSyntaxHighlighter *that = const_cast<FontSyntaxHighlighter *>(this);
+
+    cursor.setPosition(cursorPosition);
+
+    QTextBlock block = cursor.block();
+    ud = FontSyntaxHighlighterUserData::create(block, that);
+    if (ud == nullptr)
+        return false;
+
+    cursor.select(QTextCursor::WordUnderCursor);
+    return true;
+}
+
+bool FontSyntaxHighlighter::findMisspelledTextFragment(int cursorPosition,
+                                                       TextFragment &msfragment) const
+{
+    QTextCursor cursor(this->document());
+    FontSyntaxHighlighterUserData *ud = nullptr;
+    if (!this->wordCursor(cursorPosition, cursor, ud))
+        return false;
+
+    // We don't want the whole word selected
+    cursor.setPosition(cursorPosition);
+
+    const QTextBlock block = cursor.block();
+
+    const QList<TextFragment> mispelledFragments = ud->misspelledFragments();
+    const int blockCursorPosition = cursorPosition - block.position();
+    for (const TextFragment &fragment : mispelledFragments) {
+        if (fragment.start() <= blockCursorPosition && fragment.end() >= blockCursorPosition) {
+            msfragment = fragment;
+            return true;
+        }
+    }
+
+    return false;
+}
+
+void FontSyntaxHighlighter::checkForSpellingMistakeInCurrentWord()
+{
+    TextFragment fragment;
+    if (m_cursorPosition >= 0 && this->findMisspelledTextFragment(m_cursorPosition, fragment)) {
+        this->setWordUnderCursorIsMisspelled(true);
+        this->setSpellingSuggestionsForWordUnderCursor(fragment.suggestions());
+    } else {
+        this->setWordUnderCursorIsMisspelled(false);
+        this->setSpellingSuggestionsForWordUnderCursor(QStringList());
     }
 }
 
@@ -997,10 +1452,11 @@ void Transliterator::setTextDocument(QQuickTextDocument *val)
                        &Transliterator::processTransliteration);
         }
 
-        this->setCursorPosition(-1);
-        this->setHasActiveFocus(false);
         if (!m_fontHighlighter.isNull())
             m_fontHighlighter->setDocument(nullptr);
+
+        this->setCursorPosition(-1);
+        this->setHasActiveFocus(false);
     }
 
     m_textDocument = val;
@@ -1043,6 +1499,9 @@ void Transliterator::setCursorPosition(int val)
 
     m_cursorPosition = val;
     emit cursorPositionChanged();
+
+    if (!m_fontHighlighter.isNull())
+        m_fontHighlighter->setCursorPosition(m_cursorPosition);
 }
 
 void Transliterator::setHasActiveFocus(bool val)
@@ -1072,12 +1531,56 @@ void Transliterator::setApplyLanguageFonts(bool val)
         if (m_fontHighlighter.isNull())
             m_fontHighlighter = new FontSyntaxHighlighter(this);
         m_fontHighlighter->setDocument(this->document());
+        m_fontHighlighter->setEnforceDefaultFont(m_enforeDefaultFont);
+        m_fontHighlighter->setEnforceHeadingFontSize(m_enforceHeadingFontSize);
+        m_fontHighlighter->setSpellCheckEnabled(m_spellCheckEnabled);
+        m_fontHighlighter->setCursorPosition(m_cursorPosition);
     } else {
         m_fontHighlighter->setDocument(nullptr);
         delete m_fontHighlighter;
     }
 
     emit applyLanguageFontsChanged();
+    emit highlighterChanged();
+}
+
+void Transliterator::setEnforeDefaultFont(bool val)
+{
+    if (m_enforeDefaultFont == val)
+        return;
+
+    m_enforeDefaultFont = val;
+
+    if (!m_fontHighlighter.isNull())
+        m_fontHighlighter->setEnforceDefaultFont(val);
+
+    emit enforeDefaultFontChanged();
+}
+
+void Transliterator::setEnforceHeadingFontSize(bool val)
+{
+    if (m_enforceHeadingFontSize == val)
+        return;
+
+    m_enforceHeadingFontSize = val;
+
+    if (!m_fontHighlighter.isNull())
+        m_fontHighlighter->setEnforceHeadingFontSize(val);
+
+    emit enforceHeadingFontSizeChanged();
+}
+
+void Transliterator::setSpellCheckEnabled(bool val)
+{
+    if (m_spellCheckEnabled == val)
+        return;
+
+    m_spellCheckEnabled = val;
+
+    if (!m_fontHighlighter.isNull())
+        m_fontHighlighter->setSpellCheckEnabled(true);
+
+    emit spellCheckEnabledChanged();
 }
 
 void Transliterator::setTransliterateCurrentWordOnly(bool val)
@@ -1310,7 +1813,7 @@ void TransliteratedText::setColor(const QColor &val)
 
 void TransliteratedText::paint(QPainter *painter)
 {
-#ifndef QT_NO_DEBUG
+#ifndef QT_NO_DEBUG_OUTPUT
     qDebug("TransliteratedText is painting %s", qPrintable(m_text));
 #endif
 
@@ -1360,4 +1863,63 @@ void TransliteratedText::setContentHeight(qreal val)
 
     m_contentHeight = val;
     emit contentHeightChanged();
+}
+
+///////////////////////////////////////////////////////////////////////////////
+
+TransliterationHints::TransliterationHints(QObject *parent) : QObject(parent) { }
+
+TransliterationHints::~TransliterationHints() { }
+
+TransliterationHints *TransliterationHints::qmlAttachedProperties(QObject *object)
+{
+    return new TransliterationHints(object);
+}
+
+TransliterationHints *TransliterationHints::find(QQuickItem *item)
+{
+    if (item == nullptr)
+        return nullptr;
+
+    do {
+        TransliterationHints *ret =
+                item->findChild<TransliterationHints *>(QString(), Qt::FindDirectChildrenOnly);
+        if (ret)
+            return ret;
+
+        item = item->parentItem();
+    } while (item);
+
+    return nullptr;
+}
+
+void TransliterationHints::setAllowedMechanisms(AllowedMechanisms val)
+{
+    if (m_allowedMechanisms == val)
+        return;
+
+    m_allowedMechanisms = val;
+    emit allowedMechanismsChanged();
+}
+
+void TransliterationUtils::polishFontsAndInsertTextAtCursor(
+        QTextCursor &cursor, const QString &text, const QVector<QTextLayout::FormatRange> &formats)
+{
+    const int startPos = cursor.position();
+    TransliterationEngine::instance()->evaluateBoundariesAndInsertText(cursor, text);
+    const int endPos = cursor.position();
+
+    if (!formats.isEmpty()) {
+        cursor.setPosition(startPos);
+        for (const QTextLayout::FormatRange &formatRange : formats) {
+            const int length = qMin(startPos + formatRange.start + formatRange.length, endPos)
+                    - (startPos + formatRange.start);
+            cursor.setPosition(startPos + formatRange.start);
+            if (length > 0) {
+                cursor.setPosition(startPos + formatRange.start + length, QTextCursor::KeepAnchor);
+                cursor.mergeCharFormat(formatRange.format);
+            }
+        }
+        cursor.setPosition(endPos);
+    }
 }

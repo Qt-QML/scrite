@@ -1,7 +1,7 @@
 /****************************************************************************
 **
-** Copyright (C) TERIFLIX Entertainment Spaces Pvt. Ltd. Bengaluru
-** Author: Prashanth N Udupa (prashanth.udupa@teriflix.com)
+** Copyright (C) VCreate Logic Pvt. Ltd. Bengaluru
+** Author: Prashanth N Udupa (prashanth@scrite.io)
 **
 ** This code is distributed under GPL v3. Complete text of the license
 ** can be found here: https://www.gnu.org/licenses/gpl-3.0.txt
@@ -48,12 +48,12 @@ AppWindow::AppWindow()
         format.setSamples(-1);
     else
         format.setSamples(2); // default
+    this->setFormat(format);
 
 #ifdef Q_OS_MAC
     this->setFlag(Qt::WindowFullscreenButtonHint); // [0.5.2 All] Full Screen Mode #194
 #endif
     this->setObjectName(QStringLiteral("ScriteWindow"));
-    this->setFormat(format);
 
 #ifdef Q_OS_MAC
     QMenuBar *menuBar = new QMenuBar(nullptr);
@@ -106,6 +106,14 @@ AppWindow::AppWindow()
 AppWindow::~AppWindow()
 {
     ::AppWindowInstance = nullptr;
+}
+
+void AppWindow::showEvent(QShowEvent *se)
+{
+    QQuickWindow::showEvent(se);
+    connect(this, &AppWindow::activeFocusItemChanged, TransliterationEngine::instance(),
+            &TransliterationEngine::determineEnabledLanguages);
+    TransliterationEngine::instance()->determineEnabledLanguages();
 }
 
 void AppWindow::initializeFileNameToOpen()

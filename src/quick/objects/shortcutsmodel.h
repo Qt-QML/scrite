@@ -1,7 +1,7 @@
 /****************************************************************************
 **
-** Copyright (C) TERIFLIX Entertainment Spaces Pvt. Ltd. Bengaluru
-** Author: Prashanth N Udupa (prashanth.udupa@teriflix.com)
+** Copyright (C) VCreate Logic Pvt. Ltd. Bengaluru
+** Author: Prashanth N Udupa (prashanth@scrite.io)
 **
 ** This code is distributed under GPL v3. Complete text of the license
 ** can be found here: https://www.gnu.org/licenses/gpl-3.0.txt
@@ -62,7 +62,7 @@ class ShortcutsModelItem : public QObject
     QML_ATTACHED(ShortcutsModelItem)
 
 public:
-    ShortcutsModelItem(QObject *parent = nullptr);
+    explicit ShortcutsModelItem(QObject *parent = nullptr);
     ~ShortcutsModelItem();
 
     static ShortcutsModelItem *qmlAttachedProperties(QObject *object);

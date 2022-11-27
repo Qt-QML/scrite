@@ -1,7 +1,7 @@
 /****************************************************************************
 **
-** Copyright (C) TERIFLIX Entertainment Spaces Pvt. Ltd. Bengaluru
-** Author: Prashanth N Udupa (prashanth.udupa@teriflix.com)
+** Copyright (C) VCreate Logic Pvt. Ltd. Bengaluru
+** Author: Prashanth N Udupa (prashanth@scrite.io)
 **
 ** This code is distributed under GPL v3. Complete text of the license
 ** can be found here: https://www.gnu.org/licenses/gpl-3.0.txt
@@ -43,7 +43,7 @@ class BoundingBoxEvaluator : public QObject
     QML_ELEMENT
 
 public:
-    BoundingBoxEvaluator(QObject *parent = nullptr);
+    explicit BoundingBoxEvaluator(QObject *parent = nullptr);
     ~BoundingBoxEvaluator();
 
     Q_PROPERTY(qreal margin READ margin WRITE setMargin NOTIFY marginChanged)
@@ -141,7 +141,7 @@ class BoundingBoxItem : public QObject
     QML_ATTACHED(BoundingBoxItem)
 
 public:
-    BoundingBoxItem(QObject *parent = nullptr);
+    explicit BoundingBoxItem(QObject *parent = nullptr);
     ~BoundingBoxItem();
 
     Q_SIGNAL void aboutToDestroy(BoundingBoxItem *ptr);
@@ -258,7 +258,7 @@ class BoundingBoxPreview : public QQuickPaintedItem
     QML_ELEMENT
 
 public:
-    BoundingBoxPreview(QQuickItem *parent = nullptr);
+    explicit BoundingBoxPreview(QQuickItem *parent = nullptr);
     ~BoundingBoxPreview();
 
     Q_PROPERTY(QColor backgroundColor READ backgroundColor WRITE setBackgroundColor NOTIFY backgroundColorChanged)

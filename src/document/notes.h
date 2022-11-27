@@ -1,7 +1,7 @@
 /****************************************************************************
 **
-** Copyright (C) TERIFLIX Entertainment Spaces Pvt. Ltd. Bengaluru
-** Author: Prashanth N Udupa (prashanth.udupa@teriflix.com)
+** Copyright (C) VCreate Logic Pvt. Ltd. Bengaluru
+** Author: Prashanth N Udupa (prashanth@scrite.io)
 **
 ** This code is distributed under GPL v3. Complete text of the license
 ** can be found here: https://www.gnu.org/licenses/gpl-3.0.txt
@@ -43,11 +43,11 @@ class Note : public QObject, public QObjectSerializer::Interface
 public:
     static Note *findById(const QString &id);
 
-    Note(QObject *parent = nullptr);
+    explicit Note(QObject *parent = nullptr);
     ~Note();
     Q_SIGNAL void aboutToDelete(Note *ptr);
 
-    Q_PROPERTY(Notes* notes READ notes CONSTANT STORED false)
+    Q_PROPERTY(Notes *notes READ notes CONSTANT STORED false)
     Notes *notes() const;
 
     Q_PROPERTY(QString id READ id NOTIFY idChanged)
@@ -84,7 +84,7 @@ public:
     QString formId() const { return m_formId; }
     Q_SIGNAL void formIdChanged();
 
-    Q_PROPERTY(Form* form READ form RESET resetForm NOTIFY formChanged STORED false)
+    Q_PROPERTY(Form *form READ form RESET resetForm NOTIFY formChanged STORED false)
     Form *form() const { return m_form; }
     Q_SIGNAL void formChanged();
 
@@ -96,7 +96,7 @@ public:
     Q_INVOKABLE void setFormData(const QString &key, const QJsonValue &value);
     Q_INVOKABLE QJsonValue getFormData(const QString &key) const;
 
-    Q_PROPERTY(Attachments* attachments READ attachments CONSTANT)
+    Q_PROPERTY(Attachments *attachments READ attachments CONSTANT)
     Attachments *attachments() const { return m_attachments; }
 
     Q_SIGNAL void noteModified();
@@ -105,6 +105,18 @@ public:
     void prepareForSerialization();
     void serializeToJson(QJsonObject &json) const;
     void deserializeFromJson(const QJsonObject &);
+
+    // Text Document Export Support
+    struct WriteOptions
+    {
+        WriteOptions() { }
+        int titleHeadingLevel = 2;
+        bool includeTitle = true;
+        bool includeSummary = true;
+        bool includeFormAnswerHints = true;
+        bool includeAnsweredFormQuestionsOnly = true;
+    };
+    void write(QTextCursor &cursor, const WriteOptions &options = WriteOptions()) const;
 
 private:
     void setId(const QString &val);
@@ -121,6 +133,7 @@ private:
     QString m_title;
     QString m_formId;
     QString m_summary;
+    bool m_autoSummaryText = false;
     QJsonValue m_content;
     QJsonObject m_formData;
     QColor m_color = Qt::white;
@@ -130,7 +143,7 @@ private:
 };
 
 class RemoveNoteUndoCommand;
-class Notes : public ObjectListPropertyModel<Note *>, public QObjectSerializer::Interface
+class Notes : public QObjectListModel<Note *>, public QObjectSerializer::Interface
 {
     Q_OBJECT
     Q_INTERFACES(QObjectSerializer::Interface)
@@ -140,7 +153,7 @@ class Notes : public ObjectListPropertyModel<Note *>, public QObjectSerializer::
 public:
     static Notes *findById(const QString &id);
 
-    Notes(QObject *parent = nullptr);
+    explicit Notes(QObject *parent = nullptr);
     ~Notes();
     Q_SIGNAL void aboutToDelete(Notes *ptr);
 
@@ -158,22 +171,22 @@ public:
     Q_PROPERTY(OwnerType ownerType READ ownerType CONSTANT)
     OwnerType ownerType() const;
 
-    Q_PROPERTY(QObject* owner READ owner STORED false CONSTANT)
+    Q_PROPERTY(QObject *owner READ owner STORED false CONSTANT)
     QObject *owner() const { return this->QObject::parent(); }
 
-    Q_PROPERTY(Structure* structure READ structure STORED false CONSTANT)
+    Q_PROPERTY(Structure *structure READ structure STORED false CONSTANT)
     Structure *structure() const;
 
     Q_PROPERTY(ScreenplayElement *breakElement READ breakElement STORED false CONSTANT)
     ScreenplayElement *breakElement() const;
 
-    Q_PROPERTY(Scene* scene READ scene STORED false CONSTANT)
+    Q_PROPERTY(Scene *scene READ scene STORED false CONSTANT)
     Scene *scene() const;
 
-    Q_PROPERTY(Character* character READ character STORED false CONSTANT)
+    Q_PROPERTY(Character *character READ character STORED false CONSTANT)
     Character *character() const;
 
-    Q_PROPERTY(Relationship* relationship READ relationship STORED false CONSTANT)
+    Q_PROPERTY(Relationship *relationship READ relationship STORED false CONSTANT)
     Relationship *relationship() const;
 
     /*
@@ -220,6 +233,15 @@ public:
 
     // Helper method to port notes from old notes[]
     void loadOldNotes(const QJsonArray &array);
+
+    // Text Document Export Support
+    struct WriteOptions
+    {
+        WriteOptions() { }
+        bool includeTextNotes = true;
+        bool includeFormNotes = true;
+    };
+    void write(QTextCursor &cursor, const WriteOptions &options = WriteOptions()) const;
 
 private:
     friend class Scene;

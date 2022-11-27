@@ -1,7 +1,7 @@
 /****************************************************************************
 **
-** Copyright (C) TERIFLIX Entertainment Spaces Pvt. Ltd. Bengaluru
-** Author: Prashanth N Udupa (prashanth.udupa@teriflix.com)
+** Copyright (C) VCreate Logic Pvt. Ltd. Bengaluru
+** Author: Prashanth N Udupa (prashanth@scrite.io)
 **
 ** This code is distributed under GPL v3. Complete text of the license
 ** can be found here: https://www.gnu.org/licenses/gpl-3.0.txt
@@ -42,6 +42,13 @@ Column {
     property int indentation: 0
     property int answerLength: FormQuestion.LongParagraph
 
+    signal focusNextRequest()
+    signal focusPreviousRequest()
+
+    function assumeFocus(pos) {
+        answerItemLoader.assumeFocus(pos)
+    }
+
     Row {
         id: questionRow
         width: parent.width-indentation
@@ -52,6 +59,7 @@ Column {
         Label {
             id: questionNumberText
             font.bold: true
+            font.pointSize: Scrite.app.idealFontPointSize + 2
             horizontalAlignment: Text.AlignRight
             width: idealAppFontMetrics.averageCharacterWidth * nrQuestionDigits
             anchors.top: parent.top
@@ -60,6 +68,7 @@ Column {
         Label {
             id: questionText
             font.bold: true
+            font.pointSize: Scrite.app.idealFontPointSize + 2
             width: parent.width - questionNumberText.width - parent.spacing
             wrapMode: Text.WrapAtWordBoundaryOrAnywhere
             anchors.top: parent.top
@@ -74,13 +83,7 @@ Column {
         border.width: 1
         border.color: Scrite.app.translucent(primaryColors.borderColor, 0.25)
         height: Math.max(minHeight, answerItemLoader.item ? answerItemLoader.item.height : 0)
-        property real minHeight: (idealAppFontMetrics.lineSpacing + idealAppFontMetrics.descent + idealAppFontMetrics.ascent) * (answerLength === FormQuestion.ShortParagraph ? 1 : 3)
-
-        MouseArea {
-            anchors.fill: parent
-            enabled: answerItemLoader.lod === answerItemLoader.eLOW
-            onClicked: answerItemLoader.TabSequenceItem.assumeFocus()
-        }
+        property real minHeight: (idealAppFontMetrics.lineSpacing + idealAppFontMetrics.descent + idealAppFontMetrics.ascent) * (answerLength == FormQuestion.ShortParagraph ? 1.1 : 3)
 
         LodLoader {
             id: answerItemLoader
@@ -91,19 +94,30 @@ Column {
             TabSequenceItem.sequence: tabSequenceIndex
             TabSequenceItem.onAboutToReceiveFocus: lod = eHIGH
 
+            function assumeFocus(position) {
+                if(lod === eLOW)
+                    lod = eHIGH
+                Qt.callLater( (pos) => { item.assumeFocus(pos) }, position )
+            }
+
             lowDetailComponent: TextArea {
                 font.pointSize: Scrite.app.idealFontPointSize
                 wrapMode: Text.WrapAtWordBoundaryOrAnywhere
                 text: formField.answer === "" ? formField.placeholderText : formField.answer
                 opacity: formField.answer === "" ? 0.5 : 1
-                padding: 5
+                leftPadding: 5; rightPadding: 5
+                topPadding: 5; bottomPadding: 5
                 Transliterator.textDocument: textDocument
                 Transliterator.applyLanguageFonts: screenplayEditorSettings.applyUserDefinedLanguageFonts
+                Transliterator.spellCheckEnabled: formField.answer !== ""
                 readOnly: true
                 selectByMouse: false
                 selectByKeyboard: false
                 background: Item { }
-                onPressed: Qt.callLater( () => { answerItemLoader.TabSequenceItem.assumeFocus() } )
+                onPressed:  (mouse) => {
+                                const position = answerItemLoader.item.positionAt(mouse.x, mouse.y)
+                                answerItemLoader.assumeFocus(position)
+                            }
             }
 
             highDetailComponent: TextArea {
@@ -119,6 +133,7 @@ Column {
                 Transliterator.hasActiveFocus: activeFocus
                 Transliterator.applyLanguageFonts: screenplayEditorSettings.applyUserDefinedLanguageFonts
                 Transliterator.textDocumentUndoRedoEnabled: enableUndoRedo
+                Transliterator.spellCheckEnabled: true
                 readOnly: Scrite.document.readOnly
                 background: Item { }
                 SpecialSymbolsSupport {
@@ -135,17 +150,43 @@ Column {
                     onUndoRequest: answerText.undo()
                     onRedoRequest: answerText.redo()
                 }
-
+                SpellingSuggestionsMenu2 { }
                 onActiveFocusChanged: {
-                    if(!activeFocus) {
+                    if(!activeFocus && !persistentSelection) {
                         if(dialogUnderlay.visible)
                             return
                         answerItemLoader.lod = answerItemLoader.eLOW
                     }
                 }
-                Component.onCompleted: forceActiveFocus()
+                Component.onCompleted: {
+                    forceActiveFocus()
+                    enableSpellCheck()
+                }
                 text: formField.answer
                 onTextChanged: formField.answer = text
+
+                Keys.onUpPressed: (event) => {
+                                      if(TextDocument.canGoUp())
+                                          event.accepted = false
+                                      else {
+                                          event.accepted = true
+                                          Qt.callLater(focusPreviousRequest)
+                                      }
+                                  }
+
+                Keys.onDownPressed: (event) => {
+                                        if(TextDocument.canGoDown())
+                                            event.accepted = false
+                                        else {
+                                            event.accepted = true
+                                            Qt.callLater(focusNextRequest)
+                                        }
+                                    }
+
+                function assumeFocus(pos) {
+                    forceActiveFocus()
+                    cursorPosition = pos < 0 ? TextDocument.lastCursorPosition() : pos
+                }
             }
         }
     }

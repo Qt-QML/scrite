@@ -1,7 +1,7 @@
 /****************************************************************************
 **
-** Copyright (C) TERIFLIX Entertainment Spaces Pvt. Ltd. Bengaluru
-** Author: Prashanth N Udupa (prashanth.udupa@teriflix.com)
+** Copyright (C) VCreate Logic Pvt. Ltd. Bengaluru
+** Author: Prashanth N Udupa (prashanth@scrite.io)
 **
 ** This code is distributed under GPL v3. Complete text of the license
 ** can be found here: https://www.gnu.org/licenses/gpl-3.0.txt
@@ -58,6 +58,7 @@ Attachment::Attachment(QObject *parent) : QObject(parent)
     connect(this, &Attachment::titleChanged, this, &Attachment::attachmentModified);
     connect(this, &Attachment::filePathChanged, this, &Attachment::attachmentModified);
     connect(this, &Attachment::mimeTypeChanged, this, &Attachment::attachmentModified);
+    connect(this, &Attachment::featuredChanged, this, &Attachment::attachmentModified);
     connect(this, &Attachment::originalFileNameChanged, this, &Attachment::attachmentModified);
 
     DocumentFileSystem *dfs = ScriteDocument::instance()->fileSystem();
@@ -76,6 +77,15 @@ Attachment::~Attachment()
     emit aboutToDelete(this);
 }
 
+void Attachment::setFeatured(bool val)
+{
+    if (m_featured == val)
+        return;
+
+    m_featured = val;
+    emit featuredChanged();
+}
+
 void Attachment::setTitle(const QString &val)
 {
     if (m_title == val)
@@ -83,6 +93,15 @@ void Attachment::setTitle(const QString &val)
 
     m_title = val;
     emit titleChanged();
+}
+
+void Attachment::setUserData(const QJsonObject &val)
+{
+    if (m_userData == val)
+        return;
+
+    m_userData = val;
+    emit userDataChanged();
 }
 
 void Attachment::openAttachmentAnonymously()
@@ -159,6 +178,7 @@ void Attachment::setFilePath(const QString &val)
         return;
 
     m_filePath = val;
+    m_fileSource = QUrl::fromLocalFile(path);
     emit filePathChanged();
 }
 
@@ -244,12 +264,14 @@ void Attachment::setType(Type val)
 
 ///////////////////////////////////////////////////////////////////////////////
 
-Attachments::Attachments(QObject *parent) : ObjectListPropertyModel<Attachment *>(parent)
+Attachments::Attachments(QObject *parent) : QObjectListModel<Attachment *>(parent)
 {
     connect(this, &Attachments::rowsMoved, this, &Attachments::attachmentsModified);
     connect(this, &Attachments::dataChanged, this, &Attachments::attachmentsModified);
     connect(this, &Attachments::objectCountChanged, this, &Attachments::attachmentsModified);
     connect(this, &Attachments::objectCountChanged, this, &Attachments::attachmentCountChanged);
+    connect(this, &Attachments::attachmentsModified, this,
+            &Attachments::evaluateFeaturedAttachmentLater);
 }
 
 Attachments::~Attachments() { }
@@ -345,6 +367,7 @@ Attachment *Attachments::includeAttachment(const QString &filePath)
     ptr->setMimeType(mimeType.name());
     ptr->setFilePath(attachedFilePath);
     ptr->setOriginalFileName(fi.fileName());
+    ptr->setType(Attachment::determineType(fi));
     this->includeAttachment(ptr);
 
     return ptr;
@@ -427,6 +450,7 @@ void Attachments::includeAttachment(Attachment *ptr)
 
     connect(ptr, &Attachment::aboutToDelete, this, &Attachments::attachmentDestroyed);
     connect(ptr, &Attachment::attachmentModified, this, &Attachments::attachmentsModified);
+    this->evaluateFeaturedAttachmentLater();
 
     this->append(ptr);
 }
@@ -442,10 +466,16 @@ void Attachments::attachmentDestroyed(Attachment *ptr)
 
     disconnect(ptr, &Attachment::aboutToDelete, this, &Attachments::attachmentDestroyed);
     disconnect(ptr, &Attachment::attachmentModified, this, &Attachments::attachmentsModified);
-
     this->removeAt(index);
 
+    if (m_featuredAttachment == ptr) {
+        m_featuredAttachment = nullptr;
+        emit featuredAttachmentChanged();
+    }
+
     ptr->deleteLater();
+
+    this->evaluateFeaturedAttachmentLater();
 }
 
 void Attachments::includeAttachments(const QList<Attachment *> &list)
@@ -462,6 +492,39 @@ void Attachments::includeAttachments(const QList<Attachment *> &list)
     }
 
     this->assign(list);
+    this->evaluateFeaturedAttachmentLater();
+}
+
+void Attachments::evaluateFeaturedAttachment()
+{
+    const QList<Attachment *> &_list = this->list();
+
+    Attachment *fattachment = [_list]() -> Attachment * {
+        for (int i = _list.size() - 1; i >= 0; i--) {
+            Attachment *ptr = _list.at(i);
+            if (ptr->isFeatured())
+                return ptr;
+        }
+        return nullptr;
+    }();
+
+    if (fattachment != m_featuredAttachment) {
+        m_featuredAttachment = fattachment;
+        emit featuredAttachmentChanged();
+    }
+}
+
+void Attachments::evaluateFeaturedAttachmentLater()
+{
+    if (m_evalutateFeaturedAttachmentTimer == nullptr) {
+        m_evalutateFeaturedAttachmentTimer = new QTimer(this);
+        m_evalutateFeaturedAttachmentTimer->setSingleShot(true);
+        m_evalutateFeaturedAttachmentTimer->setInterval(0);
+        connect(m_evalutateFeaturedAttachmentTimer, &QTimer::timeout, this,
+                &Attachments::evaluateFeaturedAttachment);
+    }
+
+    m_evalutateFeaturedAttachmentTimer->start();
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -580,8 +643,10 @@ void AttachmentsDropArea::dropEvent(QDropEvent *de)
         if (m_allowDrop) {
             de->acceptProposedAction();
 
-            if (m_target != nullptr)
-                m_target->includeAttachment(m_attachment->filePath());
+            if (m_target != nullptr) {
+                auto attachment = m_target->includeAttachment(m_attachment->filePath());
+                attachment->setFeatured(m_attachment->isFeatured());
+            }
         }
 
         m_attachment->deleteLater();

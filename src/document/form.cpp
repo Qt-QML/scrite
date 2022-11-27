@@ -1,7 +1,7 @@
 /****************************************************************************
 **
-** Copyright (C) TERIFLIX Entertainment Spaces Pvt. Ltd. Bengaluru
-** Author: Prashanth N Udupa (prashanth.udupa@teriflix.com)
+** Copyright (C) VCreate Logic Pvt. Ltd. Bengaluru
+** Author: Prashanth N Udupa (prashanth@scrite.io)
 **
 ** This code is distributed under GPL v3. Complete text of the license
 ** can be found here: https://www.gnu.org/licenses/gpl-3.0.txt
@@ -13,14 +13,14 @@
 
 #include "form.h"
 #include "application.h"
+#include "jsonhttprequest.h"
 #include "networkaccessmanager.h"
 
 #include <QDir>
 #include <QUuid>
+#include <QStack>
 #include <QApplication>
 #include <QJsonDocument>
-#include <QNetworkReply>
-#include <QStack>
 
 FormQuestion::FormQuestion(QObject *parent) : QObject(parent) { }
 
@@ -116,9 +116,9 @@ QUrl Form::moreInfoUrl() const
     return m_moreInfoUrl;
 }
 
-ObjectListPropertyModel<FormQuestion *> *Form::questionsModel() const
+QObjectListModel<FormQuestion *> *Form::questionsModel() const
 {
-    return const_cast<ObjectListPropertyModel<FormQuestion *> *>(&m_questions);
+    return const_cast<QObjectListModel<FormQuestion *> *>(&m_questions);
 }
 
 FormQuestion *Form::questionAt(int index) const
@@ -225,7 +225,7 @@ void Form::deserializeFromJson(const QJsonObject &json)
         const QJsonObject qjs = qjsi.toObject();
         FormQuestion *question = new FormQuestion(this);
         connect(question, &FormQuestion::aboutToDelete, &m_questions,
-                &ObjectListPropertyModel<FormQuestion *>::objectDestroyed);
+                &QObjectListModel<FormQuestion *>::objectDestroyed);
 
         if (qjs.contains(idAttr))
             question->setId(qjs.value(idAttr).toString());
@@ -361,13 +361,12 @@ Forms *Forms::global()
     return forms;
 }
 
-Forms::Forms(QObject *parent) : ObjectListPropertyModel<Form *>(parent)
+Forms::Forms(QObject *parent) : QObjectListModel<Form *>(parent)
 {
-    connect(this, &ObjectListPropertyModel<Form *>::objectCountChanged, this,
-            &Forms::formCountChanged);
+    connect(this, &QObjectListModel<Form *>::objectCountChanged, this, &Forms::formCountChanged);
 }
 
-Forms::Forms(bool, QObject *parent) : ObjectListPropertyModel<Form *>(parent)
+Forms::Forms(bool, QObject *parent) : QObjectListModel<Form *>(parent)
 {
     this->downloadForms();
 }
@@ -531,38 +530,32 @@ void Forms::itemRemoveEvent(Form *ptr)
 
 void Forms::downloadForms()
 {
-    if (this->findChild<QNetworkReply *>() != nullptr)
+    if (this->findChild<JsonHttpRequest *>() != nullptr)
         return;
 
-    const QUrl url =
-            QUrl(QStringLiteral("http://www.teriflix.in/scrite/library/forms/forms.hexdb"));
+    JsonHttpRequest *call = new JsonHttpRequest(this);
+    call->setType(JsonHttpRequest::GET);
+    call->setApi(QLatin1String("scriptalay/forms"));
+    call->setAutoDelete(true);
+    connect(call, &JsonHttpRequest::finished, this, [=]() {
+        if (call->hasError()) {
+            m_errorReport->setErrorMessage(call->errorText(), call->errorData());
+            return;
+        }
 
-    QNetworkAccessManager *nam = NetworkAccessManager::instance();
-    QNetworkRequest request(url);
-    QNetworkReply *reply = nam->get(request);
-    reply->setParent(this);
-    connect(reply, &QNetworkReply::finished, this, [=]() {
-        const QByteArray bytes = reply->readAll();
-        reply->deleteLater();
-
-        const QByteArray bson = qUncompress(QByteArray::fromHex(bytes));
-
-        const QJsonDocument doc = QJsonDocument::fromBinaryData(bson);
-        if (doc.isNull())
+        if (!call->hasResponse())
             return;
 
-        QJsonArray records;
-        if (doc.isArray())
-            records = doc.array();
-        else
-            records.append(doc.object());
+        QList<Form *> forms = this->list();
+
+        const QJsonArray records = call->responseData().value(QLatin1String("records")).toArray();
+        if (records.isEmpty())
+            return;
 
         ErrorReport *actualErrorReport = m_errorReport;
         QStringList errors;
 
-        QList<Form *> forms = this->list();
-
-        for (const QJsonValue &record : qAsConst(records)) {
+        for (const QJsonValue &record : records) {
             ErrorReport tempErrorReport;
             m_errorReport = &tempErrorReport;
 
@@ -584,4 +577,5 @@ void Forms::downloadForms()
         if (!errors.isEmpty())
             m_errorReport->setErrorMessage(errors.join(QStringLiteral(", ")));
     });
+    call->call();
 }

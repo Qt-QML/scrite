@@ -1,7 +1,7 @@
 /****************************************************************************
 **
-** Copyright (C) TERIFLIX Entertainment Spaces Pvt. Ltd. Bengaluru
-** Author: Prashanth N Udupa (prashanth.udupa@teriflix.com)
+** Copyright (C) VCreate Logic Pvt. Ltd. Bengaluru
+** Author: Prashanth N Udupa (prashanth@scrite.io)
 **
 ** This code is distributed under GPL v3. Complete text of the license
 ** can be found here: https://www.gnu.org/licenses/gpl-3.0.txt
@@ -23,16 +23,8 @@ class CharacterScreenplayReport : public AbstractScreenplaySubsetReport
     Q_CLASSINFO("Description", "Generate screenplay with only those scenes where one or more characters are present.")
 
 public:
-    Q_INVOKABLE CharacterScreenplayReport(QObject *parent = nullptr);
+    Q_INVOKABLE explicit CharacterScreenplayReport(QObject *parent = nullptr);
     ~CharacterScreenplayReport();
-
-    Q_CLASSINFO("includeNotes_FieldGroup", "Characters")
-    Q_CLASSINFO("includeNotes_FieldLabel", "Include character notes")
-    Q_CLASSINFO("includeNotes_FieldEditor", "CheckBox")
-    Q_PROPERTY(bool includeNotes READ includeNotes WRITE setIncludeNotes NOTIFY includeNotesChanged)
-    void setIncludeNotes(bool val);
-    bool includeNotes() const { return m_includeNotes; }
-    Q_SIGNAL void includeNotesChanged();
 
     Q_CLASSINFO("highlightDialogues_FieldGroup", "Characters")
     Q_CLASSINFO("highlightDialogues_FieldLabel", "Highlight dialogues in yellow background")
@@ -55,9 +47,6 @@ protected:
     bool includeScreenplayElement(const ScreenplayElement *) const;
     QString screenplaySubtitle() const;
     void configureScreenplayTextDocument(ScreenplayTextDocument &stDoc);
-
-    // AbstractScreenplayTextDocumentInjectionInterface interface
-    void inject(QTextCursor &, InjectLocation);
 
 private:
     QString m_comment;

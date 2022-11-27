@@ -1,7 +1,7 @@
 /****************************************************************************
 **
-** Copyright (C) TERIFLIX Entertainment Spaces Pvt. Ltd. Bengaluru
-** Author: Prashanth N Udupa (prashanth.udupa@teriflix.com)
+** Copyright (C) VCreate Logic Pvt. Ltd. Bengaluru
+** Author: Prashanth N Udupa (prashanth@scrite.io)
 **
 ** This code is distributed under GPL v3. Complete text of the license
 ** can be found here: https://www.gnu.org/licenses/gpl-3.0.txt
@@ -20,33 +20,6 @@
 #include <QJsonDocument>
 #include <QTemporaryFile>
 #include <QNetworkRequest>
-
-/*
-We will host a JSON file at http://www.teriflix.in/scrite/library.json.
-This file will be of the form..
-
-{
-    "records": [
-        {
-            "name": "...",
-            "authors": "...",
-            "revision": "...",
-            "poster": "....",
-            "url": "http://....",
-            "source": "...",
-            "copyright": "....",
-            "contributed_by": "....",
-            "logline": "....",
-            "version": "x.y.z"
-        },
-        ...
-    ]
-}
-
-All documents must be available under a plain http access (not https). Lets just avoid
-all SSL certificate validation bits for now. The data transferred is not mission critical
-anyway.
-*/
 
 QNetworkAccessManager &LibraryNetworkAccess()
 {
@@ -238,47 +211,33 @@ void Library::fetchRecords()
     if (m_busy)
         return;
 
-    const QString path = m_type == Screenplays ? QStringLiteral("/records.hexdb")
-                                               : QStringLiteral("/templates.hexdb");
-
-    QNetworkAccessManager &nam = ::LibraryNetworkAccess();
-    const QUrl url = QUrl(m_baseUrl.toString() + path);
-
     this->setBusy(true);
 
-    const QNetworkRequest request(url);
-    QNetworkReply *reply = nam.get(request);
-    connect(reply, &QNetworkReply::finished, this, [=]() {
-        const QByteArray bytes = reply->readAll();
-        reply->deleteLater();
-        this->loadDatabase(bytes);
+    JsonHttpRequest *call = new JsonHttpRequest(this);
+    call->setType(JsonHttpRequest::GET);
+    call->setApi(m_type == Screenplays ? QLatin1String("scriptalay/screenplays")
+                                       : QLatin1String("scriptalay/templates"));
+    call->setAutoDelete(true);
+    connect(call, &JsonHttpRequest::finished, this, [=]() {
+        if (call->hasError() || !call->hasResponse()) {
+            this->setBusy(false);
+            return;
+        }
+
+        const QJsonObject response = call->responseData();
+
+        m_baseUrl = response.value(QLatin1String("baseUrl")).toString();
+        emit baseUrlChanged();
+
+        this->setRecords(response.value(QLatin1String("records")).toArray());
         this->setBusy(false);
     });
-}
-
-void Library::loadDatabase(const QByteArray &bytes)
-{
-    const QByteArray bson = qUncompress(QByteArray::fromHex(bytes));
-
-    const QJsonDocument doc = QJsonDocument::fromBinaryData(bson);
-    if (doc.isNull())
-        return;
-
-    const QJsonObject object = doc.object();
-    const QJsonArray records = object.value("records").toArray();
-    this->setRecords(records);
+    call->call();
 }
 
 void Library::setRecords(const QJsonArray &array)
 {
     this->beginResetModel();
-#if 0
-    for(int j=0; j<10; j++)
-    {
-        for(int i=0; i<array.size(); i++)
-            m_records.append( array.at(i) );
-    }
-#else
     m_records = array;
     if (m_type == Templates) {
         QJsonObject defaultTemplate;
@@ -292,7 +251,6 @@ void Library::setRecords(const QJsonArray &array)
         defaultTemplate.insert(QStringLiteral("more_info"), QLatin1String());
         m_records.prepend(defaultTemplate);
     }
-#endif
     this->endResetModel();
 
     emit countChanged();

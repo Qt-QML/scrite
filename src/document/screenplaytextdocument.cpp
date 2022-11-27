@@ -1,7 +1,7 @@
 /****************************************************************************
 **
-** Copyright (C) TERIFLIX Entertainment Spaces Pvt. Ltd. Bengaluru
-** Author: Prashanth N Udupa (prashanth.udupa@teriflix.com)
+** Copyright (C) VCreate Logic Pvt. Ltd. Bengaluru
+** Author: Prashanth N Udupa (prashanth@scrite.io)
 **
 ** This code is distributed under GPL v3. Complete text of the license
 ** can be found here: https://www.gnu.org/licenses/gpl-3.0.txt
@@ -64,7 +64,10 @@ inline QString timeToString(const QTime &t)
 class ScreenplayParagraphBlockData : public QTextBlockUserData
 {
 public:
-    ScreenplayParagraphBlockData(const SceneElement *element);
+    enum { Type = 1002 };
+    const int type = Type;
+
+    explicit ScreenplayParagraphBlockData(const SceneElement *element);
     ~ScreenplayParagraphBlockData();
 
     bool contains(const SceneElement *other) const;
@@ -182,7 +185,7 @@ ScreenplayParagraphBlockData *ScreenplayParagraphBlockData::get(QTextBlockUserDa
 
     ScreenplayParagraphBlockData *userData2 =
             reinterpret_cast<ScreenplayParagraphBlockData *>(userData);
-    return userData2;
+    return (userData2->type == ScreenplayParagraphBlockData::Type) ? userData2 : nullptr;
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -237,6 +240,12 @@ ScreenplayTextDocument::~ScreenplayTextDocument()
 
     if (m_textDocument != nullptr && m_textDocument->parent() == this)
         m_textDocument->setUndoRedoEnabled(true);
+}
+
+int ScreenplayTextDocument::headingFontPointSize(int headingLevel)
+{
+    static QList<int> fontSizes({ 22, 20, 18, 16, 14 });
+    return fontSizes[qBound(0, headingLevel, fontSizes.size() - 1)];
 }
 
 void ScreenplayTextDocument::setTextDocument(QTextDocument *val)
@@ -402,6 +411,26 @@ void ScreenplayTextDocument::setIncludeSceneSynopsis(bool val)
     this->loadScreenplayLater();
 }
 
+void ScreenplayTextDocument::setIncludeSceneFeaturedImage(bool val)
+{
+    if (m_includeSceneFeaturedImage == val)
+        return;
+
+    m_includeSceneFeaturedImage = val;
+    emit includeSceneFeaturedImageChanged();
+
+    this->loadScreenplayLater();
+}
+
+void ScreenplayTextDocument::setIncludeSceneComments(bool val)
+{
+    if (m_includeSceneComments == val)
+        return;
+
+    m_includeSceneComments = val;
+    emit includeSceneCommentsChanged();
+}
+
 void ScreenplayTextDocument::setPurpose(ScreenplayTextDocument::Purpose val)
 {
     if (m_purpose == val)
@@ -449,6 +478,17 @@ void ScreenplayTextDocument::setTitlePageIsCentered(bool val)
 
     m_titlePageIsCentered = val;
     emit titlePageIsCenteredChanged();
+
+    this->loadScreenplayLater();
+}
+
+void ScreenplayTextDocument::setIncludeMoreAndContdMarkers(bool val)
+{
+    if (m_includeMoreAndContdMarkers == val)
+        return;
+
+    m_includeMoreAndContdMarkers = val;
+    emit includeMoreAndContdMarkersChanged();
 
     this->loadScreenplayLater();
 }
@@ -1059,11 +1099,6 @@ void ScreenplayTextDocument::setCurrentPageAndPosition(int page, qreal pos)
     }
 }
 
-inline void polishFontsAndInsertTextAtCursor(QTextCursor &cursor, const QString &text)
-{
-    TransliterationEngine::instance()->evaluateBoundariesAndInsertText(cursor, text);
-};
-
 #ifdef DISPLAY_DOCUMENT_IN_TEXTEDIT
 #include <QTextEdit>
 #endif // DISPLAY_DOCUMENT_IN_TEXTEDIT
@@ -1214,8 +1249,11 @@ void ScreenplayTextDocument::loadScreenplay()
                 || lastPrintedElement->elementType() != ScreenplayElement::BreakElementType))
             cursor.insertText(QStringLiteral("Episode ")
                               + QString::number(element->episodeIndex() + 1)
-                              + QStringLiteral(": "));
+                              + QStringLiteral(", "));
         cursor.insertText(element->breakTitle());
+
+        if (!element->breakSubtitle().isEmpty())
+            cursor.insertText(QStringLiteral(": ") + element->breakSubtitle().toUpper());
     };
 
     const int fsi = m_screenplay->firstSceneIndex();
@@ -1300,13 +1338,15 @@ void ScreenplayTextDocument::loadScreenplay()
     if (injection != nullptr)
         injection->inject(cursor, AbstractScreenplayTextDocumentInjectionInterface::AfterLastScene);
 
-    this->includeMoreAndContdMarkers();
+    if (m_includeMoreAndContdMarkers)
+        this->includeMoreAndContdMarkers();
+
     this->evaluatePageBoundariesLater();
 }
 
 void ScreenplayTextDocument::includeMoreAndContdMarkers()
 {
-    if (m_purpose != ForPrinting /* || m_syncEnabled*/)
+    if (m_purpose != ForPrinting || !m_includeMoreAndContdMarkers /* || m_syncEnabled*/)
         return;
 
     /**
@@ -1375,8 +1415,8 @@ void ScreenplayTextDocument::includeMoreAndContdMarkers()
         QTextCursor cursor(block);
         cursor.setPosition(block.position() + block.length() - 1, QTextCursor::KeepAnchor);
 
-        const QTextBlockFormat restoreBlockFormat = cursor.blockFormat();
-        const QTextCharFormat restoreCharFormat = cursor.charFormat();
+        // const QTextBlockFormat restoreBlockFormat = cursor.blockFormat();
+        // const QTextCharFormat restoreCharFormat = cursor.charFormat();
 
         QTextBlockFormat pageBreakFormat;
         pageBreakFormat.setPageBreakPolicy(QTextBlockFormat::PageBreak_AlwaysAfter);
@@ -1401,7 +1441,7 @@ void ScreenplayTextDocument::includeMoreAndContdMarkers()
         if (m_purpose == ForDisplay)
             cursor.insertText(characterName);
         else
-            polishFontsAndInsertTextAtCursor(cursor, characterName);
+            TransliterationUtils::polishFontsAndInsertTextAtCursor(cursor, characterName);
 
         QTextCharFormat contdMarkerFormat;
         contdMarkerFormat.setObjectType(ScreenplayTextObjectInterface::Kind);
@@ -1507,7 +1547,8 @@ void ScreenplayTextDocument::includeMoreAndContdMarkers()
                     if (m_purpose == ForDisplay)
                         cursor.insertText(blockTextPart1);
                     else
-                        polishFontsAndInsertTextAtCursor(cursor, blockTextPart1);
+                        TransliterationUtils::polishFontsAndInsertTextAtCursor(
+                                cursor, blockTextPart1, dialogElement->textFormats());
                     block = cursor.block();
                     block.setUserData(new ScreenplayParagraphBlockData(dialogElement));
 
@@ -1515,7 +1556,28 @@ void ScreenplayTextDocument::includeMoreAndContdMarkers()
                     if (m_purpose == ForDisplay)
                         cursor.insertText(blockTextPart2);
                     else
-                        polishFontsAndInsertTextAtCursor(cursor, blockTextPart2);
+                        TransliterationUtils::polishFontsAndInsertTextAtCursor(
+                                cursor, blockTextPart2,
+                                [](const QVector<QTextLayout::FormatRange> &formats, int position) {
+                                    if (position == 0)
+                                        return formats;
+
+                                    QVector<QTextLayout::FormatRange> ret;
+                                    for (const QTextLayout::FormatRange &formatRange : formats) {
+                                        if (formatRange.start + formatRange.length - 1 < position)
+                                            continue;
+
+                                        QTextLayout::FormatRange newFormatRange;
+                                        newFormatRange.start = formatRange.start - position;
+                                        newFormatRange.length =
+                                                formatRange.length + qMin(newFormatRange.start, 0);
+                                        newFormatRange.start = qMax(0, newFormatRange.start);
+                                        newFormatRange.format = formatRange.format;
+                                        ret.append(newFormatRange);
+                                    }
+
+                                    return ret;
+                                }(dialogElement->textFormats(), blockTextPart1.length() + 1));
                     block = cursor.block();
                     block.setUserData(new ScreenplayParagraphBlockData(dialogElement));
 
@@ -1738,7 +1800,7 @@ void ScreenplayTextDocument::onSceneRemoved(ScreenplayElement *element, int inde
         return;
 
     QTextFrame *frame = this->findTextFrame(element);
-#ifdef QT_NO_DEBUG
+#ifdef QT_NO_DEBUG_OUTPUT
     if (frame == nullptr)
         return;
 #else
@@ -1792,7 +1854,7 @@ void ScreenplayTextDocument::onSceneInserted(ScreenplayElement *element, int ind
 
         if (before != nullptr) {
             QTextFrame *beforeFrame = this->findTextFrame(before);
-#ifdef QT_NO_DEBUG
+#ifdef QT_NO_DEBUG_OUTPUT
             // This cannot be fixed in the next update cycle. The document will
             // be completely out of sync with the scenes. So we should take some
             // time now and deal with it.
@@ -1896,7 +1958,7 @@ void ScreenplayTextDocument::onSceneElementChanged(SceneElement *para,
     QList<ScreenplayElement *> elements = m_screenplay->sceneElements(scene);
     for (ScreenplayElement *element : qAsConst(elements)) {
         QTextFrame *frame = this->findTextFrame(element);
-#ifdef QT_NO_DEBUG
+#ifdef QT_NO_DEBUG_OUTPUT
         // This will probably get updated in the next cycle. Trying to fix
         // this here & right now will likely lead to slow UI updates, which
         // is much worse than having to live with dirty text document.
@@ -2315,6 +2377,9 @@ bool ScreenplayTextDocument::updateFromScreenplayElement(const ScreenplayElement
 void ScreenplayTextDocument::loadScreenplayElement(const ScreenplayElement *element,
                                                    QTextCursor &cursor)
 {
+    static const QRegularExpression newlinesRegEx("\n+");
+    static const QString newline = QStringLiteral("\n");
+
     Q_ASSERT_X(cursor.currentFrame() == this->findTextFrame(element), "ScreenplayTextDocument",
                "Screenplay element can be loaded only after a frame for it has been created");
 
@@ -2375,11 +2440,12 @@ void ScreenplayTextDocument::loadScreenplayElement(const ScreenplayElement *elem
             prepareCursor(cursor, SceneElement::Heading, !insertBlock);
 
             if (m_purpose == ForPrinting) {
-                polishFontsAndInsertTextAtCursor(cursor, heading->locationType());
+                TransliterationUtils::polishFontsAndInsertTextAtCursor(cursor,
+                                                                       heading->locationType());
                 cursor.insertText(QStringLiteral(". "));
-                polishFontsAndInsertTextAtCursor(cursor, heading->location());
+                TransliterationUtils::polishFontsAndInsertTextAtCursor(cursor, heading->location());
                 cursor.insertText(QStringLiteral(" - "));
-                polishFontsAndInsertTextAtCursor(cursor, heading->moment());
+                TransliterationUtils::polishFontsAndInsertTextAtCursor(cursor, heading->moment());
             } else {
                 if (m_sceneNumbers)
                     cursor.insertText(element->resolvedSceneNumber() + QStringLiteral(". "));
@@ -2488,24 +2554,117 @@ void ScreenplayTextDocument::loadScreenplayElement(const ScreenplayElement *elem
             }
         }
 
-        if (m_includeSceneSynopsis && !scene->title().isEmpty()) {
-            QColor sceneColor = scene->color().lighter(175);
-            sceneColor.setAlphaF(0.5);
+        if (m_includeSceneFeaturedImage) {
+            const Attachments *sceneAttachments = scene->attachments();
+            const Attachment *featuredAttachment =
+                    sceneAttachments ? sceneAttachments->featuredAttachment() : nullptr;
+            const Attachment *featuredImage =
+                    featuredAttachment && featuredAttachment->type() == Attachment::Photo
+                    ? featuredAttachment
+                    : nullptr;
 
-            QTextBlockFormat blockFormat;
-            blockFormat.setTopMargin(10);
-            blockFormat.setBackground(sceneColor);
+            if (featuredImage) {
+                const QUrl url(QStringLiteral("scrite://") + featuredImage->filePath());
+                const QImage image(featuredImage->fileSource().toLocalFile());
 
-            QTextCharFormat charFormat;
-            charFormat.setFont(Application::instance()->font());
+                m_textDocument->addResource(QTextDocument::ImageResource, url,
+                                            QVariant::fromValue<QImage>(image));
+
+                const QSizeF imageSize = image.size().scaled(QSize(320, 240), Qt::KeepAspectRatio);
+
+                QTextBlockFormat blockFormat;
+                blockFormat.setTopMargin(10);
+                cursor.insertBlock(blockFormat);
+
+                insertBlock = true;
+
+                QTextImageFormat imageFormat;
+                imageFormat.setName(url.toString());
+                imageFormat.setWidth(imageSize.width());
+                imageFormat.setHeight(imageSize.height());
+                cursor.insertImage(imageFormat);
+            }
+        }
+
+        if (m_includeSceneSynopsis) {
+            const StructureElement *structureElement = scene->structureElement();
+            const QString title = structureElement ? structureElement->nativeTitle() : QString();
 
             QString synopsis = scene->title();
-            synopsis.replace(QRegularExpression("\n+"), QStringLiteral("\n"));
+            synopsis = synopsis.replace(newlinesRegEx, newline);
 
-            cursor.insertBlock(blockFormat, charFormat);
-            cursor.insertText(synopsis);
+            const bool includingSomething = !title.isEmpty() || !synopsis.isEmpty();
 
-            insertBlock = true;
+            QTextFrame *frame = cursor.currentFrame();
+
+            if (includingSomething) {
+                if (insertBlock)
+                    cursor.insertBlock();
+
+                QTextFrameFormat format;
+                format.setPadding(5);
+                format.setBottomMargin(5);
+                format.setBorder(1);
+                format.setBorderBrush(scene->color().darker());
+
+                cursor.insertFrame(format);
+            }
+
+            if (!title.isEmpty()) {
+                QColor sceneColor = scene->color().lighter(175);
+                sceneColor.setAlphaF(0.5);
+
+                prepareCursor(cursor, SceneElement::Heading, false);
+
+                QTextBlockFormat format;
+                format.setBackground(sceneColor);
+                cursor.mergeBlockFormat(format);
+
+                TransliterationUtils::polishFontsAndInsertTextAtCursor(cursor, title);
+
+                cursor.insertBlock();
+            }
+
+            if (!synopsis.isEmpty()) {
+                prepareCursor(cursor, SceneElement::Action, false);
+                TransliterationUtils::polishFontsAndInsertTextAtCursor(cursor, synopsis);
+            }
+
+            if (includingSomething) {
+                cursor = frame->lastCursorPosition();
+                insertBlock = false;
+            } else
+                insertBlock = true;
+        }
+
+        if (m_includeSceneComments) {
+            QString comments = scene->comments().trimmed();
+            if (!comments.isEmpty()) {
+                comments.replace(newlinesRegEx, newline);
+
+                comments = QLatin1String("Comments: ") + comments;
+
+                QColor sceneColor = scene->color().lighter(175);
+                sceneColor.setAlphaF(0.5);
+
+                QTextBlockFormat blockFormat;
+                blockFormat.setTopMargin(m_includeSceneSynopsis ? 0 : 10);
+                blockFormat.setLeftMargin(15);
+                blockFormat.setRightMargin(15);
+                blockFormat.setBackground(sceneColor);
+
+                QTextCharFormat charFormat;
+                charFormat.setFont(cursor.document()->defaultFont());
+
+                QString synopsis = scene->title();
+                synopsis.replace(newlinesRegEx, newline);
+
+                cursor.insertBlock(blockFormat, charFormat);
+                // cursor.insertText(synopsis);
+                TransliterationUtils::polishFontsAndInsertTextAtCursor(cursor, comments);
+
+                insertBlock = true;
+            }
         }
 
         bool highlightParagraph = false;
@@ -2546,7 +2705,8 @@ void ScreenplayTextDocument::loadScreenplayElement(const ScreenplayElement *elem
 
             const QString text = para->text();
             if (m_purpose == ForPrinting)
-                polishFontsAndInsertTextAtCursor(cursor, text);
+                TransliterationUtils::polishFontsAndInsertTextAtCursor(cursor, text,
+                                                                       para->textFormats());
             else
                 cursor.insertText(text);
 
@@ -2699,7 +2859,7 @@ void ScreenplayTextDocument::processSceneResetList()
         const QList<ScreenplayElement *> elements = m_screenplay->sceneElements(scene);
         for (ScreenplayElement *element : elements) {
             QTextFrame *frame = this->findTextFrame(element);
-#ifdef QT_NO_DEBUG
+#ifdef QT_NO_DEBUG_OUTPUT
             // This will probably get updated in the next cycle. Trying to fix
             // this here & right now will likely lead to slow UI updates, which
             // is much worse than having to live with dirty text document.

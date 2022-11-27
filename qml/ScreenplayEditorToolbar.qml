@@ -1,7 +1,7 @@
 /****************************************************************************
 **
-** Copyright (C) TERIFLIX Entertainment Spaces Pvt. Ltd. Bengaluru
-** Author: Prashanth N Udupa (prashanth.udupa@teriflix.com)
+** Copyright (C) VCreate Logic Pvt. Ltd. Bengaluru
+** Author: Prashanth N Udupa (prashanth@scrite.io)
 **
 ** This code is distributed under GPL v3. Complete text of the license
 ** can be found here: https://www.gnu.org/licenses/gpl-3.0.txt
@@ -113,9 +113,10 @@ Row {
     ToolButton3 {
         id: screenplayViewOptions
         iconSource: "../icons/content/view_options.png"
-        ToolTip.text: "Screenplay View Options"
+        ToolTip.text: "Screenplay Editor Options"
         down: screenplayViewOptionsMenu.visible
         onClicked: screenplayViewOptionsMenu.open()
+        objectName: "screenplayViewOptionsButton"
 
         Item {
             anchors.left: parent.left
@@ -138,6 +139,13 @@ Row {
                     property bool sceneBlocksVisible: screenplayEditorSettings.spaceBetweenScenes > 0
                     icon.source: sceneBlocksVisible ? "../icons/navigation/check.png" : "../icons/content/blank.png"
                     onTriggered: screenplayEditorSettings.spaceBetweenScenes = sceneBlocksVisible ? 0 : 40
+                }
+
+                MenuItem2 {
+                    text: "Show Text Format Tools"
+                    property bool toolsVisible: screenplayEditorSettings.textFormatDockVisible
+                    icon.source: toolsVisible ? "../icons/navigation/check.png" : "../icons/content/blank.png"
+                    onTriggered: screenplayEditorSettings.textFormatDockVisible = !toolsVisible
                 }
 
                 MenuItem2 {
@@ -173,6 +181,12 @@ Row {
                     enabled: !Scrite.document.readOnly && screenplayEditorSettings.displaySceneCharacters
                 }
 
+                MenuItem2 {
+                    icon.source: "../icons/content/blank.png"
+                    text: "Reset Scene Numbers"
+                    onClicked: Scrite.document.screenplay.resetSceneNumbers()
+                    enabled: !Scrite.document.readOnly
+                }
             }
         }
     }

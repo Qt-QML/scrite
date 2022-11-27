@@ -1,7 +1,7 @@
 /****************************************************************************
 **
-** Copyright (C) TERIFLIX Entertainment Spaces Pvt. Ltd. Bengaluru
-** Author: Prashanth N Udupa (prashanth.udupa@teriflix.com)
+** Copyright (C) VCreate Logic Pvt. Ltd. Bengaluru
+** Author: Prashanth N Udupa (prashanth@scrite.io)
 **
 ** This code is distributed under GPL v3. Complete text of the license
 ** can be found here: https://www.gnu.org/licenses/gpl-3.0.txt
@@ -11,8 +11,8 @@
 **
 ****************************************************************************/
 
-#ifndef OBJECTLISTPROPERTYMODEL_H
-#define OBJECTLISTPROPERTYMODEL_H
+#ifndef QOBJECTLISTMODEL_H
+#define QOBJECTLISTMODEL_H
 
 #include <QSet>
 #include <QList>
@@ -22,13 +22,13 @@
 #include <QAbstractListModel>
 #include <QSortFilterProxyModel>
 
-class ObjectListPropertyModelBase : public QAbstractListModel
+class AbstractQObjectListModel : public QAbstractListModel
 {
     Q_OBJECT
 
 public:
-    ObjectListPropertyModelBase(QObject *parent = nullptr);
-    ~ObjectListPropertyModelBase() { }
+    explicit AbstractQObjectListModel(QObject *parent = nullptr);
+    ~AbstractQObjectListModel() { }
 
     Q_PROPERTY(int objectCount READ objectCount NOTIFY objectCountChanged)
     virtual int objectCount() const = 0;
@@ -48,11 +48,11 @@ public:
 };
 
 template<class T>
-class ObjectListPropertyModel : public ObjectListPropertyModelBase
+class QObjectListModel : public AbstractQObjectListModel
 {
 public:
-    ObjectListPropertyModel(QObject *parent = nullptr) : ObjectListPropertyModelBase(parent) { }
-    ~ObjectListPropertyModel() { }
+    explicit QObjectListModel(QObject *parent = nullptr) : AbstractQObjectListModel(parent) { }
+    ~QObjectListModel() { }
 
     operator QList<T>() { return m_list; }
     QList<T> &list() { return m_list; }
@@ -256,24 +256,27 @@ class SortFilterObjectListModel : public QSortFilterProxyModel
     QML_ELEMENT
 
 public:
-    SortFilterObjectListModel(QObject *parent = nullptr);
+    explicit SortFilterObjectListModel(QObject *parent = nullptr);
     ~SortFilterObjectListModel() { }
 
     Q_PROPERTY(int objectCount READ objectCount NOTIFY objectCountChanged)
     int objectCount() const { return this->rowCount(QModelIndex()); }
     Q_SIGNAL void objectCountChanged();
 
-    Q_PROPERTY(QByteArray sortByProperty READ sortByProperty WRITE setSortByProperty NOTIFY sortByPropertyChanged)
+    Q_PROPERTY(QByteArray sortByProperty READ sortByProperty WRITE setSortByProperty NOTIFY
+                       sortByPropertyChanged)
     void setSortByProperty(const QByteArray &val);
     QByteArray sortByProperty() const { return m_sortByProperty; }
     Q_SIGNAL void sortByPropertyChanged();
 
-    Q_PROPERTY(QByteArray filterByProperty READ filterByProperty WRITE setFilterByProperty NOTIFY filterByPropertyChanged)
+    Q_PROPERTY(QByteArray filterByProperty READ filterByProperty WRITE setFilterByProperty NOTIFY
+                       filterByPropertyChanged)
     void setFilterByProperty(const QByteArray &val);
     QByteArray filterByProperty() const { return m_filterByProperty; }
     Q_SIGNAL void filterByPropertyChanged();
 
-    Q_PROPERTY(QVariantList filterValues READ filterValues WRITE setFilterValues NOTIFY filterValuesChanged)
+    Q_PROPERTY(QVariantList filterValues READ filterValues WRITE setFilterValues NOTIFY
+                       filterValuesChanged)
     void setFilterValues(const QVariantList &val);
     QVariantList filterValues() const { return m_filterValues; }
     Q_SIGNAL void filterValuesChanged();
@@ -285,12 +288,14 @@ public:
     FilterMode filterMode() const { return m_filterMode; }
     Q_SIGNAL void filterModeChanged();
 
-    Q_PROPERTY(QJSValue sortFunction READ sortFunction WRITE setSortFunction NOTIFY sortFunctionChanged)
+    Q_PROPERTY(QJSValue sortFunction READ sortFunction WRITE setSortFunction NOTIFY
+                       sortFunctionChanged)
     void setSortFunction(const QJSValue &val);
     QJSValue sortFunction() const { return m_sortFunction; }
     Q_SIGNAL void sortFunctionChanged();
 
-    Q_PROPERTY(QJSValue filterFunction READ filterFunction WRITE setFilterFunction NOTIFY filterFunctionChanged)
+    Q_PROPERTY(QJSValue filterFunction READ filterFunction WRITE setFilterFunction NOTIFY
+                       filterFunctionChanged)
     void setFilterFunction(const QJSValue &val);
     QJSValue filterFunction() const { return m_filterFunction; }
     Q_SIGNAL void filterFunctionChanged();
@@ -327,4 +332,4 @@ inline QList<T> qobject_list_cast(const QList<QObject *> &list, bool deleteUncas
     return ret;
 }
 
-#endif // OBJECTLISTPROPERTYMODEL_H
+#endif // QOBJECTLISTMODEL_H

@@ -1,7 +1,7 @@
 /****************************************************************************
 **
-** Copyright (C) TERIFLIX Entertainment Spaces Pvt. Ltd. Bengaluru
-** Author: Prashanth N Udupa (prashanth.udupa@teriflix.com)
+** Copyright (C) VCreate Logic Pvt. Ltd. Bengaluru
+** Author: Prashanth N Udupa (prashanth@scrite.io)
 **
 ** This code is distributed under GPL v3. Complete text of the license
 ** can be found here: https://www.gnu.org/licenses/gpl-3.0.txt
@@ -694,24 +694,7 @@ Item {
                             checkable: true
                             enabled: Scrite.document.structure.elementStacks.objectCount === 0
                             checked: Scrite.document.structure.canvasUIMode === Structure.IndexCardUI
-                            onToggled: {
-                                var toggleCanvasUI = function() {
-                                    if(Scrite.document.structure.canvasUIMode === Structure.IndexCardUI)
-                                        Scrite.document.structure.canvasUIMode = Structure.SynopsisEditorUI
-                                    else
-                                        Scrite.document.structure.canvasUIMode = Structure.IndexCardUI
-                                }
-
-                                if(mainTabBar.currentIndex === 0) {
-                                    toggleCanvasUI()
-                                } else {
-                                    contentLoader.active = false
-                                    Scrite.app.execLater(contentLoader, 100, function() {
-                                        toggleCanvasUI()
-                                        contentLoader.active = true
-                                    })
-                                }
-                            }
+                            onToggled: contentLoader.reset( contentLoader.toggleCanvasUI )
                         }
                     }
                 }
@@ -796,27 +779,64 @@ Item {
                 GroupBox {
                     label: Text { text: "Page Layout (Display)" }
                     width: (parent.width - parent.spacing)/2
+                    clip: true
 
                     Column {
                         width: parent.width
                         spacing: 10
 
-                        Text {
+                        Row {
                             width: parent.width
-                            wrapMode: Text.WordWrap
-                            text: "Default Resolution: <strong>" + Math.round(Scrite.document.displayFormat.pageLayout.defaultResolution) + "</strong>"
+
+                            Text {
+                                width: parent.width * 0.2
+                                wrapMode: Text.WordWrap
+                                padding: 5
+                                text: "DPI:"
+                                anchors.verticalCenter: parent.verticalCenter
+                            }
+
+                            TextField2 {
+                                width: parent.width * 0.8
+                                placeholderText: "leave empty for default (" + Math.round(Scrite.document.displayFormat.pageLayout.defaultResolution) + "), or enter a custom value."
+                                text: Scrite.document.displayFormat.pageLayout.customResolution > 0 ? Scrite.document.displayFormat.pageLayout.customResolution : ""
+                                onEditingComplete: {
+                                    var value = parseFloat(text)
+                                    if(isNaN(value))
+                                        Scrite.document.displayFormat.pageLayout.customResolution = 0
+                                    else
+                                        Scrite.document.displayFormat.pageLayout.customResolution = value
+                                }
+                            }
                         }
 
-                        TextField2 {
+                        Row {
                             width: parent.width
-                            placeholderText: "leave empty for default, or enter a custom value."
-                            text: Scrite.document.displayFormat.pageLayout.customResolution > 0 ? Scrite.document.displayFormat.pageLayout.customResolution : ""
-                            onEditingComplete: {
-                                var value = parseFloat(text)
-                                if(isNaN(value))
-                                    Scrite.document.displayFormat.pageLayout.customResolution = 0
-                                else
-                                    Scrite.document.displayFormat.pageLayout.customResolution = value
+                            enabled: Scrite.app.isWindowsPlatform
+
+                            Text {
+                                width: parent.width * 0.2
+                                wrapMode: Text.WordWrap
+                                padding: 5
+                                text: "Scale:"
+                                anchors.verticalCenter: parent.verticalCenter
+                            }
+
+                            TextField2 {
+                                width: parent.width * 0.8
+                                placeholderText: "Default: 1.0. Requires restart if changed."
+                                text: Scrite.app.isWindowsPlatform ? Scrite.app.getWindowsEnvironmentVariable("SCRITE_UI_SCALE_FACTOR", "1.0") : "1.0"
+                                onEditingComplete: {
+                                    var value = parseFloat(text)
+                                    if(isNaN(value))
+                                        value = 1.0
+
+                                    value = Math.min(Math.max(0.1,value),10)
+                                    value = Math.round(value*100)/100
+
+                                    Scrite.app.removeWindowsEnvironmentVariable("SCRITE_DPI_MODE")
+                                    Scrite.app.changeWindowsEnvironmentVariable("SCRITE_UI_SCALE_FACTOR", ""+value)
+                                }
                             }
                         }
                     }
@@ -1564,6 +1584,7 @@ Item {
                         selectMultiple: false
                         sidebarVisible: true
                         selectExisting: true
+                        dirUpAction.shortcut: "Ctrl+Shift+U" // The default Ctrl+U interfers with underline
                         onAccepted: {
                             if(fileUrl != "")
                                 Scrite.document.screenplay.setCoverPagePhoto(Scrite.app.urlToLocalFile(fileUrl))
@@ -1924,8 +1945,8 @@ Item {
             id: formattingRulesPageView
             readonly property real labelWidth: 125
             property var pageData: pagesArray[currentIndex]
-            property SceneElementFormat displayElementFormat: Scrite.document.formatting.elementFormat(pageData.elementType)
             property SceneElementFormat printElementFormat: Scrite.document.printFormat.elementFormat(pageData.elementType)
+            property SceneElementFormat displayElementFormat: Scrite.document.formatting.elementFormat(pageData.elementType)
 
             pagesArray: [
                 { "elementName": "Heading", "elementType": SceneElement.Heading },
@@ -2328,7 +2349,7 @@ Item {
                             text: "Left"
                             checkable: true
                             checked: displayElementFormat.textAlignment === Qt.AlignLeft
-                            onCheckedChanged: {
+                            onToggled: {
                                 if(checked) {
                                     displayElementFormat.textAlignment = Qt.AlignLeft
                                     printElementFormat.textAlignment = Qt.AlignLeft
@@ -2340,7 +2361,7 @@ Item {
                             text: "Center"
                             checkable: true
                             checked: displayElementFormat.textAlignment === Qt.AlignHCenter
-                            onCheckedChanged: {
+                            onToggled: {
                                 if(checked) {
                                     displayElementFormat.textAlignment = Qt.AlignHCenter
                                     printElementFormat.textAlignment = Qt.AlignHCenter
@@ -2352,7 +2373,7 @@ Item {
                             text: "Right"
                             checkable: true
                             checked: displayElementFormat.textAlignment === Qt.AlignRight
-                            onCheckedChanged: {
+                            onToggled: {
                                 if(checked) {
                                     displayElementFormat.textAlignment = Qt.AlignRight
                                     printElementFormat.textAlignment = Qt.AlignRight
@@ -2364,7 +2385,7 @@ Item {
                             text: "Justify"
                             checkable: true
                             checked: displayElementFormat.textAlignment === Qt.AlignJustify
-                            onCheckedChanged: {
+                            onToggled: {
                                 if(checked) {
                                     displayElementFormat.textAlignment = Qt.AlignJustify
                                     printElementFormat.textAlignment = Qt.AlignJustify
@@ -2447,26 +2468,18 @@ Item {
                 anchors.rightMargin: 20
                 spacing: 20
 
-                ScrollView {
+                FlickableTextArea {
+                    id: groupsDataEdit
                     width: parent.width
                     height: parent.height - parent.spacing - buttonsRow.height
                     clip: true
+                    font.family: "Courier Prime"
+                    font.pointSize: Scrite.app.idealFontPointSize
+                    text: Scrite.document.structure.groupsData
                     background: Rectangle {
                         color: primaryColors.c50.background
                         border.width: 1
                         border.color: primaryColors.borderColor
-                    }
-
-                    TextArea {
-                        id: groupsDataEdit
-                        text: Scrite.document.structure.groupsData
-                        font.family: "Courier Prime"
-                        font.pointSize: Scrite.app.idealFontPointSize
-                        background: Item { }
-                        leftPadding: 5
-                        rightPadding: 10
-                        selectByMouse: true
-                        selectByKeyboard: true
                     }
                 }
 
@@ -2502,26 +2515,18 @@ Item {
                 anchors.rightMargin: 20
                 spacing: 20
 
-                ScrollView {
+                FlickableTextArea {
+                    id: groupsDataEdit
                     width: parent.width
                     height: parent.height - parent.spacing - buttonsRow.height
                     clip: true
+                    font.family: "Courier Prime"
+                    font.pointSize: Scrite.app.idealFontPointSize + 2
+                    text: Scrite.app.fileContents(Scrite.document.structure.defaultGroupsDataFile)
                     background: Rectangle {
                         color: accentColors.c50.background
                         border.width: 1
                         border.color: accentColors.borderColor
-                    }
-
-                    TextArea {
-                        id: groupsDataEdit
-                        text: Scrite.app.fileContents(Scrite.document.structure.defaultGroupsDataFile)
-                        font.family: "Courier Prime"
-                        font.pointSize: Scrite.app.idealFontPointSize
-                        background: Item { }
-                        leftPadding: 5
-                        rightPadding: 10
-                        selectByMouse: true
-                        selectByKeyboard: true
                     }
                 }
 

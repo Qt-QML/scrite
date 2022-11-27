@@ -1,7 +1,7 @@
 /****************************************************************************
 **
-** Copyright (C) TERIFLIX Entertainment Spaces Pvt. Ltd. Bengaluru
-** Author: Prashanth N Udupa (prashanth.udupa@teriflix.com)
+** Copyright (C) VCreate Logic Pvt. Ltd. Bengaluru
+** Author: Prashanth N Udupa (prashanth@scrite.io)
 **
 ** This code is distributed under GPL v3. Complete text of the license
 ** can be found here: https://www.gnu.org/licenses/gpl-3.0.txt
@@ -27,6 +27,7 @@
 #include "notification.h"
 #include "htmlimporter.h"
 #include "timeprofiler.h"
+#include "notebookreport.h"
 #include "qobjectfactory.h"
 #include "locationreport.h"
 #include "characterreport.h"
@@ -332,6 +333,7 @@ DeviceIOFactories::DeviceIOFactories()
     ReportsFactory.addClass<CharacterScreenplayReport>();
     ReportsFactory.addClass<SceneCharacterMatrixReport>();
     ReportsFactory.addClass<StatisticsReport>();
+    ReportsFactory.addClass<NotebookReport>();
 }
 
 DeviceIOFactories::~DeviceIOFactories() { }
@@ -996,15 +998,18 @@ void ScriteDocument::saveAs(const QString &givenFileName)
         return;
     }
 
-#ifndef QT_NO_DEBUG
-    {
+#ifndef QT_NO_DEBUG_OUTPUT
+    const bool saveJson = true;
+#else
+    const bool saveJson = qgetenv("SCRITE_SAVE_JSON").toUpper() == QByteArrayLiteral("YES");
+#endif
+    if (saveJson) {
         const QFileInfo fi(fileName);
         const QString fileName2 = fi.absolutePath() + "/" + fi.baseName() + ".json";
         QFile file2(fileName2);
         file2.open(QFile::WriteOnly);
         file2.write(bytes);
     }
-#endif
 
     this->setFileName(fileName);
     this->setCreatedOnThisComputer(true);
@@ -1780,7 +1785,7 @@ bool ScriteDocument::load(const QString &fileName)
             ? QJsonDocument::fromJson(m_docFileSystem.header())
             : QJsonDocument::fromBinaryData(m_docFileSystem.header());
 
-#ifndef QT_NO_DEBUG
+#ifndef QT_NO_DEBUG_OUTPUT
     {
         const QFileInfo fi(fileName);
         const QString fileName2 = fi.absolutePath() + "/" + fi.baseName() + ".json";
@@ -2076,7 +2081,7 @@ void ScriteDocument::serializeToJson(QJsonObject &json) const
     metaInfo.insert(QStringLiteral("appName"), qApp->applicationName());
     metaInfo.insert(QStringLiteral("orgName"), qApp->organizationName());
     metaInfo.insert(QStringLiteral("orgDomain"), qApp->organizationDomain());
-    metaInfo.insert(QStringLiteral("appVersion"), QStringLiteral("0.7.12"));
+    metaInfo.insert(QStringLiteral("appVersion"), QStringLiteral("0.9.0"));
 
     QVersionNumber appVersion =
             QVersionNumber::fromString(Application::instance()->versionNumber().toString());

@@ -1,7 +1,7 @@
 /****************************************************************************
 **
-** Copyright (C) TERIFLIX Entertainment Spaces Pvt. Ltd. Bengaluru
-** Author: Prashanth N Udupa (prashanth.udupa@teriflix.com)
+** Copyright (C) VCreate Logic Pvt. Ltd. Bengaluru
+** Author: Prashanth N Udupa (prashanth@scrite.io)
 **
 ** This code is distributed under GPL v3. Complete text of the license
 ** can be found here: https://www.gnu.org/licenses/gpl-3.0.txt
@@ -22,6 +22,8 @@
 #include <QMouseEvent>
 #include <QWheelEvent>
 #include <QMimeData>
+
+// #define POST_CLONED_EVENTS_WHILE_FORWARDING
 
 EventFilterResult::EventFilterResult(QObject *parent) : QObject(parent) { }
 
@@ -153,8 +155,9 @@ bool EventFilter::forwardEventTo(QObject *object)
     if (object == nullptr || object == m_target)
         return false;
 
-    // We have to create a duplicate copy of the event and
-    // put it into the queue.
+        // We have to create a duplicate copy of the event and
+        // put it into the queue.
+#ifdef POST_CLONED_EVENTS_WHILE_FORWARDING
     if (m_currentEvent->type() == QEvent::NativeGesture)
         return qApp->sendEvent(object, m_currentEvent);
 
@@ -163,6 +166,9 @@ bool EventFilter::forwardEventTo(QObject *object)
         qApp->postEvent(object, event);
         return true;
     }
+#else
+    return qApp->sendEvent(object, m_currentEvent);
+#endif
 
     return false;
 }
@@ -393,6 +399,7 @@ bool EventFilter::eventFilter(QObject *watched, QEvent *event)
 
 QEvent *EventFilter::cloneCurrentEvent() const
 {
+#ifdef POST_CLONED_EVENTS_WHILE_FORWARDING
     if (m_currentEvent == nullptr)
         return nullptr;
 
@@ -412,7 +419,7 @@ QEvent *EventFilter::cloneCurrentEvent() const
         QWheelEvent *we = static_cast<QWheelEvent *>(m_currentEvent);
         return new QWheelEvent(we->position(), we->globalPosition(), we->pixelDelta(),
                                we->angleDelta(), we->buttons(), we->modifiers(), we->phase(),
-                               we->inverted(), we->source());
+                               we->inverted(), Qt::MouseEventSynthesizedByApplication);
     }
     case QEvent::KeyPress:
     case QEvent::KeyRelease: {
@@ -423,6 +430,7 @@ QEvent *EventFilter::cloneCurrentEvent() const
     default:
         break;
     }
+#endif
 
     return nullptr;
 }

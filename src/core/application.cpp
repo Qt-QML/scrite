@@ -1,7 +1,7 @@
 /****************************************************************************
 **
-** Copyright (C) TERIFLIX Entertainment Spaces Pvt. Ltd. Bengaluru
-** Author: Prashanth N Udupa (prashanth.udupa@teriflix.com)
+** Copyright (C) VCreate Logic Pvt. Ltd. Bengaluru
+** Author: Prashanth N Udupa (prashanth@scrite.io)
 **
 ** This code is distributed under GPL v3. Complete text of the license
 ** can be found here: https://www.gnu.org/licenses/gpl-3.0.txt
@@ -60,7 +60,7 @@ bool QtApplicationEventNotificationCallback(void **cbdata);
 void ApplicationQtMessageHandler(QtMsgType type, const QMessageLogContext &context,
                                  const QString &message)
 {
-#ifdef QT_NO_DEBUG
+#ifdef QT_NO_DEBUG_OUTPUT
     Q_UNUSED(type)
     Q_UNUSED(context)
     Q_UNUSED(message)
@@ -139,7 +139,7 @@ Application::Application(int &argc, char **argv, const QVersionNumber &version)
             m_settings->setValue(QStringLiteral("Installation/path"), this->applicationFilePath());
     }
 
-#ifndef QT_NO_DEBUG
+#ifndef QT_NO_DEBUG_OUTPUT
     QInternal::registerCallback(QInternal::EventNotifyCallback,
                                 QtApplicationEventNotificationCallback);
 #endif
@@ -184,6 +184,13 @@ Application::Application(int &argc, char **argv, const QVersionNumber &version)
     QtConcurrent::run(&Application::systemFontInfo);
 
     this->setWindowIcon(QIcon(QStringLiteral(":/images/appicon.png")));
+
+    m_customFontPointSize = [=]() -> int {
+        const QVariant val = m_settings->value(QLatin1String("Application/customFontPointSize"));
+        if (val.isValid() && !val.isNull() && val.canConvert(QMetaType::Int))
+            return val.toInt();
+        return 0;
+    }();
     this->computeIdealFontPointSize();
 
     const bool useSoftwareRenderer = [=]() -> bool {
@@ -202,12 +209,55 @@ Application::Application(int &argc, char **argv, const QVersionNumber &version)
 
     if (useSoftwareRenderer)
         QQuickWindow::setSceneGraphBackend(QSGRendererInterface::Software);
+
     QQuickStyle::setStyle(style);
+}
+
+static void copyFilesRecursively(const QDir &from, const QDir &to)
+{
+    const QFileInfoList fromList =
+            from.entryInfoList(QDir::Files | QDir::Dirs | QDir::NoDotAndDotDot);
+    for (const QFileInfo &fromFile : fromList) {
+        if (fromFile.isFile())
+            QFile::copy(fromFile.absoluteFilePath(), to.absoluteFilePath(fromFile.fileName()));
+        else if (fromFile.isDir()) {
+            QDir fromDir = from;
+            fromDir.cd(fromFile.fileName());
+
+            QDir toDir = to;
+            toDir.mkdir(fromFile.fileName());
+            toDir.cd(fromFile.fileName());
+            copyFilesRecursively(fromDir, toDir);
+        }
+    }
 }
 
 QVersionNumber Application::prepare()
 {
-    const QVersionNumber applicationVersion(0, 8, 7);
+    const QVersionNumber applicationVersion = QVersionNumber::fromString(QStringLiteral("0.9.2.8"));
+    const QString applicationVersionString = [applicationVersion]() -> QString {
+        const QVector<int> segments = applicationVersion.segments();
+
+        QStringList ret;
+
+        for (int i = 0; i < qMin(segments.size(), 3); i++)
+            ret << QString::number(segments.at(i));
+
+        for (int i = ret.size(); i < 3; i++)
+            ret << QStringLiteral("0");
+
+        for (int i = 3; i < segments.size(); i++) {
+            QString field;
+            int segment = qMax(0, segments.at(i));
+            while (--segment >= 0) {
+                field = QChar('a' + segment % 26) + field;
+                segment /= 26;
+            }
+            ret.last() += field;
+        }
+
+        return ret.join('.');
+    }();
 
     if (qApp != nullptr)
         return applicationVersion;
@@ -218,29 +268,55 @@ QVersionNumber Application::prepare()
     Application::setOrganizationName(QStringLiteral("TERIFLIX"));
     Application::setOrganizationDomain(QStringLiteral("teriflix.com"));
 
+    const QDir oldAppDataFolder =
+            QDir(QStandardPaths::writableLocation(QStandardPaths::AppDataLocation));
+
+    Application::setOrganizationName(QStringLiteral("Scrite"));
+    Application::setOrganizationDomain(QStringLiteral("scrite.io"));
+
+    if (oldAppDataFolder.exists()) {
+        const QString newAppDataPath =
+                QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
+        QDir().mkpath(newAppDataPath);
+        copyFilesRecursively(oldAppDataFolder, QDir(newAppDataPath));
+    }
+
 #ifdef Q_OS_MAC
-    Application::setApplicationVersion(applicationVersion.toString() + QStringLiteral("-beta"));
+    Application::setApplicationVersion(applicationVersionString + QStringLiteral("-beta"));
     if (QOperatingSystemVersion::current() > QOperatingSystemVersion::MacOSCatalina)
         qputenv("QT_MAC_WANTS_LAYER", QByteArrayLiteral("1"));
 #else
     if (QSysInfo::WordSize == 32)
-        Application::setApplicationVersion(applicationVersion.toString() + "-beta-x86");
+        Application::setApplicationVersion(applicationVersionString + "-beta-x86");
     else
-        Application::setApplicationVersion(applicationVersion.toString() + "-beta-x64");
+        Application::setApplicationVersion(applicationVersionString + "-beta-x64");
 #endif
 
 #ifdef Q_OS_WIN
+    Application::setAttribute(Qt::AA_UseDesktopOpenGL);
+
     // Maybe helps address https://www.github.com/teriflix/scrite/issues/247
-    const QByteArray dpiMode = qgetenv("SCRITE_DPI_MODE");
-    if (dpiMode == QByteArrayLiteral("HIGH_DPI")) {
-        Application::setAttribute(Qt::AA_EnableHighDpiScaling);
+    const QByteArray dpiMode = qgetenv("SCRITE_DPI_MODE").trimmed();
+    if (dpiMode.isEmpty()) {
+        const qreal uiScaleFactor =
+                getWindowsEnvironmentVariable(QLatin1String("SCRITE_UI_SCALE_FACTOR"),
+                                              QLatin1String("1.0"))
+                        .toDouble();
+        const QByteArray qtScaleFactor =
+                QByteArray::number(qRound(qBound(0.1, uiScaleFactor, 10.0) * 100) / 100.0);
         Application::setAttribute(Qt::AA_UseHighDpiPixmaps);
-    } else if (dpiMode == QByteArrayLiteral("96_DPI_ONLY")) {
         Application::setAttribute(Qt::AA_Use96Dpi);
         Application::setAttribute(Qt::AA_DisableHighDpiScaling);
-    } else
-        Application::setAttribute(Qt::AA_Use96Dpi);
-    Application::setAttribute(Qt::AA_UseDesktopOpenGL);
+        qputenv("QT_SCALE_FACTOR", qtScaleFactor);
+    } else {
+        if (dpiMode == QByteArrayLiteral("HIGH_DPI")) {
+            Application::setAttribute(Qt::AA_EnableHighDpiScaling);
+            Application::setAttribute(Qt::AA_UseHighDpiPixmaps);
+        } else /*if (dpiMode == QByteArrayLiteral("96_DPI_ONLY"))*/ {
+            Application::setAttribute(Qt::AA_Use96Dpi);
+            Application::setAttribute(Qt::AA_DisableHighDpiScaling);
+        }
+    }
 #endif
 
     QPalette palette = Application::palette();
@@ -254,7 +330,7 @@ QVersionNumber Application::prepare()
 
 Application::~Application()
 {
-#ifndef QT_NO_DEBUG
+#ifndef QT_NO_DEBUG_OUTPUT
     QInternal::unregisterCallback(QInternal::EventNotifyCallback,
                                   QtApplicationEventNotificationCallback);
 #endif
@@ -273,12 +349,13 @@ QString Application::installationId() const
 
 QDateTime Application::installationTimestamp() const
 {
-    QString installTimestampStr = m_settings->value("Installation/timestamp").toString();
+    QString installTimestampStr =
+            m_settings->value(QLatin1String("Installation/timestamp")).toString();
     QDateTime installTimestamp = QDateTime::fromString(installTimestampStr);
     if (installTimestampStr.isEmpty() || !installTimestamp.isValid()) {
         installTimestamp = QDateTime::currentDateTime();
         installTimestampStr = installTimestamp.toString();
-        m_settings->setValue("Installation/timestamp", installTimestampStr);
+        m_settings->setValue(QLatin1String("Installation/timestamp"), installTimestampStr);
     }
 
     return installTimestamp;
@@ -295,6 +372,8 @@ void Application::setCustomFontPointSize(int val)
         return;
 
     m_customFontPointSize = val;
+    m_settings->setValue(QLatin1String("Application/customFontPointSize"), val);
+
     emit customFontPointSizeChanged();
 
     this->computeIdealFontPointSize();
@@ -691,8 +770,8 @@ bool Application::isMouseOverItem(QQuickItem *item) const
 class ExecLater : public QObject
 {
 public:
-    ExecLater(int howMuchLater, const QJSValue &function, const QJSValueList &arg,
-              QObject *parent = nullptr);
+    explicit ExecLater(int howMuchLater, const QJSValue &function, const QJSValueList &arg,
+                       QObject *parent = nullptr);
     ~ExecLater();
 
     void timerEvent(QTimerEvent *event);
@@ -731,7 +810,7 @@ void Application::execLater(QObject *context, int howMuchLater, const QJSValue &
 {
     QObject *parent = context ? context : this;
 
-#ifndef QT_NO_DEBUG
+#ifndef QT_NO_DEBUG_OUTPUT
     qDebug() << "Registering Exec Later for " << context << " after " << howMuchLater;
 #endif
 
@@ -863,7 +942,7 @@ QJsonObject Application::objectConfigurationFormInfo(const QObject *object,
 
 bool QtApplicationEventNotificationCallback(void **cbdata)
 {
-#ifndef QT_NO_DEBUG
+#ifndef QT_NO_DEBUG_OUTPUT
     QObject *object = reinterpret_cast<QObject *>(cbdata[0]);
     QEvent *event = reinterpret_cast<QEvent *>(cbdata[1]);
     bool *result = reinterpret_cast<bool *>(cbdata[2]);
@@ -948,19 +1027,20 @@ bool Application::notify(QObject *object, QEvent *event)
 
 bool Application::notifyInternal(QObject *object, QEvent *event)
 {
-#ifndef QT_NO_DEBUG
-    static QMap<QObject *, QString> objectNameMap;
-    auto evaluateObjectName = [](QObject *object, QMap<QObject *, QString> &from) {
+#ifndef QT_NO_DEBUG_OUTPUT
+    static QHash<QObject *, QString> objectNameMap;
+    auto evaluateObjectName = [](QObject *object, QHash<QObject *, QString> &from) {
         QString objectName = from.value(object);
         if (objectName.isEmpty()) {
             QQuickItem *item = qobject_cast<QQuickItem *>(object);
             QObject *parent = item && item->parentItem() ? item->parentItem() : object->parent();
             QString parentName = parent ? from.value(parent) : "No Parent";
             if (parentName.isEmpty()) {
-                parentName = QString("%1 [%2] (%3)")
-                                     .arg(parent->metaObject()->className())
-                                     .arg((unsigned long)((void *)parent), 0, 16)
-                                     .arg(parent->objectName());
+                parentName =
+                        QString("%1 [%2] (%3)")
+                                .arg(parent ? parent->metaObject()->className() : "Unknown Parent")
+                                .arg((unsigned long)((void *)parent), 0, 16)
+                                .arg(parent->objectName());
             }
             objectName = QString("%1 [%2] (%3) under %4")
                                  .arg(object->metaObject()->className())
@@ -981,6 +1061,10 @@ bool Application::notifyInternal(QObject *object, QEvent *event)
         ExecLaterTimer *timer = ExecLaterTimer::get(te->timerId());
         qDebug() << "TimerEventDespatch: " << te->timerId() << " on " << objectName << " is "
                  << (timer ? qPrintable(timer->name()) : "Qt Timer.");
+    } else if (event->type() == QEvent::Shortcut) {
+        const QString objectName = evaluateObjectName(object, objectNameMap);
+        QShortcutEvent *se = static_cast<QShortcutEvent *>(event);
+        qDebug() << "ShortcutEvent: " << objectName << "-" << se->key().toString();
     }
 #else
     Q_UNUSED(object)
@@ -1035,6 +1119,44 @@ QPainterPath Application::stringToPainterPath(const QString &val)
     QPainterPath path;
     ds >> path;
     return path;
+}
+
+QJsonObject Application::replaceCharacterName(const QString &from, const QString &to,
+                                              const QJsonObject &delta, int *nrReplacements)
+{
+    const QString opsAttr = QStringLiteral("ops");
+    const QString insertAttr = QStringLiteral("insert");
+
+    QJsonArray ops = delta.value(opsAttr).toArray();
+
+    int totalCount = 0;
+
+    for (int i = 0; i < ops.size(); i++) {
+        QJsonValueRef item = ops[i];
+        QJsonObject op = item.toObject();
+
+        QJsonValue insert = op.value(insertAttr);
+        if (insert.isString()) {
+            int count = 0;
+            insert = replaceCharacterName(from, to, insert.toString(), &count);
+            if (count > 0) {
+                totalCount += count;
+                op.insert(insertAttr, insert);
+                item = op;
+            }
+        }
+    }
+
+    if (totalCount > 0) {
+        if (nrReplacements)
+            *nrReplacements = totalCount;
+
+        QJsonObject ret = delta;
+        ret.insert(opsAttr, ops);
+        return ret;
+    }
+
+    return delta;
 }
 
 QString Application::replaceCharacterName(const QString &from, const QString &to, const QString &in,
@@ -1413,10 +1535,59 @@ QScreen *Application::windowScreen(QObject *window) const
     return nullptr;
 }
 
-QString Application::getEnvironmentVariable(const QString &name) const
+QString Application::getEnvironmentVariable(const QString &name)
 {
     return QProcessEnvironment::systemEnvironment().value(name);
 }
+
+#ifdef Q_OS_WIN
+static QString windowsEnvironmentRegistryGroup()
+{
+    static const QString ret = QLatin1String("HKEY_CURRENT_USER\\Environment\\");
+    return ret;
+}
+
+QString Application::getWindowsEnvironmentVariable(const QString &name, const QString &defaultValue)
+{
+    QSettings settings(::windowsEnvironmentRegistryGroup(), QSettings::NativeFormat);
+    if (settings.contains(name))
+        return settings.value(name).toString();
+    return defaultValue;
+}
+
+void Application::changeWindowsEnvironmentVariable(const QString &name, const QString &value)
+{
+    QSettings settings(::windowsEnvironmentRegistryGroup(), QSettings::NativeFormat);
+    settings.setValue(name, value);
+
+    QProcessEnvironment::systemEnvironment().insert(name, value);
+}
+
+void Application::removeWindowsEnvironmentVariable(const QString &name)
+{
+    QSettings settings(::windowsEnvironmentRegistryGroup(), QSettings::NativeFormat);
+    settings.remove(name);
+
+    QProcessEnvironment::systemEnvironment().remove(name);
+}
+#else
+QString Application::getWindowsEnvironmentVariable(const QString &name, const QString &defaultValue)
+{
+    Q_UNUSED(name)
+
+    return defaultValue;
+}
+void Application::changeWindowsEnvironmentVariable(const QString &name, const QString &value)
+{
+    Q_UNUSED(name)
+    Q_UNUSED(value)
+}
+
+void Application::removeWindowsEnvironmentVariable(const QString &name)
+{
+    Q_UNUSED(name)
+}
+#endif
 
 QPointF Application::globalMousePosition() const
 {

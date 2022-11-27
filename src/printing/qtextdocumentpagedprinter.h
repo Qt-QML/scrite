@@ -1,7 +1,7 @@
 /****************************************************************************
 **
-** Copyright (C) TERIFLIX Entertainment Spaces Pvt. Ltd. Bengaluru
-** Author: Prashanth N Udupa (prashanth.udupa@teriflix.com)
+** Copyright (C) VCreate Logic Pvt. Ltd. Bengaluru
+** Author: Prashanth N Udupa (prashanth@scrite.io)
 **
 ** This code is distributed under GPL v3. Complete text of the license
 ** can be found here: https://www.gnu.org/licenses/gpl-3.0.txt
@@ -35,7 +35,7 @@ public:
     enum Type { Header, Footer };
     Q_ENUM(Type)
 
-    HeaderFooter(Type type, QObject *parent = nullptr);
+    explicit HeaderFooter(Type type, QObject *parent = nullptr);
     ~HeaderFooter();
 
     Q_PROPERTY(Type type READ type CONSTANT)
@@ -136,7 +136,7 @@ class Watermark : public QObject
     QML_UNCREATABLE("Instantiation from QML not allowed.")
 
 public:
-    Watermark(QObject *parent = nullptr);
+    explicit Watermark(QObject *parent = nullptr);
     ~Watermark();
 
     Q_PROPERTY(bool enabled READ isEnabled WRITE setEnabled NOTIFY enabledChanged)
@@ -206,7 +206,7 @@ class QTextDocumentPagedPrinter : public QObject
     QML_UNCREATABLE("Instantiation from QML not allowed.")
 
 public:
-    QTextDocumentPagedPrinter(QObject *parent = nullptr);
+    explicit QTextDocumentPagedPrinter(QObject *parent = nullptr);
     ~QTextDocumentPagedPrinter();
 
     Q_PROPERTY(HeaderFooter* header READ header CONSTANT)

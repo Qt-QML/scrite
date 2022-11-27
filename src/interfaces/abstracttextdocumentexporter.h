@@ -1,7 +1,7 @@
 /****************************************************************************
 **
-** Copyright (C) TERIFLIX Entertainment Spaces Pvt. Ltd. Bengaluru
-** Author: Prashanth N Udupa (prashanth.udupa@teriflix.com)
+** Copyright (C) VCreate Logic Pvt. Ltd. Bengaluru
+** Author: Prashanth N Udupa (prashanth@scrite.io)
 **
 ** This code is distributed under GPL v3. Complete text of the license
 ** can be found here: https://www.gnu.org/licenses/gpl-3.0.txt
@@ -33,12 +33,26 @@ public:
     bool isListSceneCharacters() const { return m_listSceneCharacters; }
     Q_SIGNAL void listSceneCharactersChanged();
 
-    Q_CLASSINFO("includeSceneSynopsis_FieldLabel", "Include synopsis of each scene.")
+    Q_CLASSINFO("includeSceneSynopsis_FieldLabel", "Include title & synopsis of each scene, if available.")
     Q_CLASSINFO("includeSceneSynopsis_FieldEditor", "CheckBox")
     Q_PROPERTY(bool includeSceneSynopsis READ isIncludeSceneSynopsis WRITE setIncludeSceneSynopsis NOTIFY includeSceneSynopsisChanged)
     void setIncludeSceneSynopsis(bool val);
     bool isIncludeSceneSynopsis() const { return m_includeSceneSynopsis; }
     Q_SIGNAL void includeSceneSynopsisChanged();
+
+    Q_CLASSINFO("includeSceneFeaturedImage_FieldLabel", "Include featured image for scene, if available.")
+    Q_CLASSINFO("includeSceneFeaturedImage_FieldEditor", "CheckBox")
+    Q_PROPERTY(bool includeSceneFeaturedImage READ isIncludeSceneFeaturedImage WRITE setIncludeSceneFeaturedImage NOTIFY includeSceneFeaturedImageChanged)
+    void setIncludeSceneFeaturedImage(bool val);
+    bool isIncludeSceneFeaturedImage() const { return m_includeSceneFeaturedImage; }
+    Q_SIGNAL void includeSceneFeaturedImageChanged();
+
+    Q_CLASSINFO("includeSceneComments_FieldLabel", "Include scene comments, if available.")
+    Q_CLASSINFO("includeSceneComments_FieldEditor", "CheckBox")
+    Q_PROPERTY(bool includeSceneComments READ isIncludeSceneComments WRITE setIncludeSceneComments NOTIFY includeSceneCommentsChanged)
+    void setIncludeSceneComments(bool val);
+    bool isIncludeSceneComments() const { return m_includeSceneComments; }
+    Q_SIGNAL void includeSceneCommentsChanged();
 
     Q_CLASSINFO("includeSceneContents_FieldLabel", "Include scene content.")
     Q_CLASSINFO("includeSceneContents_FieldEditor", "CheckBox")
@@ -69,6 +83,8 @@ private:
     bool m_listSceneCharacters = false;
     bool m_includeSceneSynopsis = false;
     bool m_includeSceneContents = true;
+    bool m_includeSceneFeaturedImage = false;
+    bool m_includeSceneComments = false;
 };
 
 #endif // ABSTRACTTEXTDOCUMENTEXPORTER_H

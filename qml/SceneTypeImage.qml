@@ -1,7 +1,7 @@
 /****************************************************************************
 **
-** Copyright (C) TERIFLIX Entertainment Spaces Pvt. Ltd. Bengaluru
-** Author: Prashanth N Udupa (prashanth.udupa@teriflix.com)
+** Copyright (C) VCreate Logic Pvt. Ltd. Bengaluru
+** Author: Prashanth N Udupa (prashanth@scrite.io)
 **
 ** This code is distributed under GPL v3. Complete text of the license
 ** can be found here: https://www.gnu.org/licenses/gpl-3.0.txt
@@ -18,15 +18,16 @@ import QtQuick.Controls 2.15
 Image {
     property bool showTooltip: true
     property int sceneType: Scene.Standard
+    property bool lightBackground: true
 
     width: 32; height: 32
     fillMode: Image.PreserveAspectFit
     mipmap: true
     source: {
         switch(sceneType) {
-        case Scene.Song: return "../icons/content/queue_mus24px.png"
-        case Scene.Action: return "../icons/content/fight_scene.png"
-        case Scene.Montage: return "../icons/content/camera_alt.png"
+        case Scene.Song: return lightBackground ? "../icons/content/queue_mus24px.png" : "../icons/content/queue_mus24px_inverted.png"
+        case Scene.Action: return lightBackground ? "../icons/content/fight_scene.png" : "../icons/content/fight_scene_inverted.png"
+        case Scene.Montage: return lightBackground ? "../icons/content/camera_alt.png" : "../icons/content/camera_alt_inverted.png"
         default: break
         }
         return ""

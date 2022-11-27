@@ -1,7 +1,7 @@
 /****************************************************************************
 **
-** Copyright (C) TERIFLIX Entertainment Spaces Pvt. Ltd. Bengaluru
-** Author: Prashanth N Udupa (prashanth.udupa@teriflix.com)
+** Copyright (C) VCreate Logic Pvt. Ltd. Bengaluru
+** Author: Prashanth N Udupa (prashanth@scrite.io)
 **
 ** This code is distributed under GPL v3. Complete text of the license
 ** can be found here: https://www.gnu.org/licenses/gpl-3.0.txt
@@ -30,6 +30,9 @@ Flickable {
     property alias placeholderText: __textArea.placeholderText
     property alias readOnly: __textArea.readOnly
     property alias background: __textArea.background
+    property bool enforceDefaultFont: true
+    property bool enforceHeadingFontSize: false
+    property bool spellCheckEnabled: true
     property TabSequenceManager tabSequenceManager
     property int tabSequenceIndex: 0
     FlickScrollSpeedControl.factor: workspaceSettings.flickScrollSpeedFactor
@@ -55,6 +58,9 @@ Flickable {
         Transliterator.hasActiveFocus: activeFocus
         Transliterator.applyLanguageFonts: screenplayEditorSettings.applyUserDefinedLanguageFonts
         Transliterator.textDocumentUndoRedoEnabled: undoRedoEnabled
+        Transliterator.spellCheckEnabled: textAreaFlickable.spellCheckEnabled
+        Transliterator.enforeDefaultFont: textAreaFlickable.enforceDefaultFont
+        Transliterator.enforceHeadingFontSize: textAreaFlickable.enforceHeadingFontSize
         readOnly: Scrite.document.readOnly
         KeyNavigation.tab: textAreaFlickable.tabItem
         KeyNavigation.backtab: textAreaFlickable.backTabItem
@@ -74,6 +80,7 @@ Flickable {
             onUndoRequest: __textArea.undo()
             onRedoRequest: __textArea.redo()
         }
+        SpellingSuggestionsMenu2 { }
         onCursorRectangleChanged: {
             var cr = cursorRectangle
             cr = Qt.rect(cr.x, cr.y-4, cr.width, cr.height+8)

@@ -1,7 +1,7 @@
 /****************************************************************************
 **
-** Copyright (C) TERIFLIX Entertainment Spaces Pvt. Ltd. Bengaluru
-** Author: Prashanth N Udupa (prashanth.udupa@teriflix.com)
+** Copyright (C) VCreate Logic Pvt. Ltd. Bengaluru
+** Author: Prashanth N Udupa (prashanth@scrite.io)
 **
 ** This code is distributed under GPL v3. Complete text of the license
 ** can be found here: https://www.gnu.org/licenses/gpl-3.0.txt
@@ -12,16 +12,18 @@
 ****************************************************************************/
 
 #include "hourglass.h"
+#include "application.h"
 #include "urlattributes.h"
 #include "garbagecollector.h"
+#include "networkaccessmanager.h"
 
 #include <QFile>
 #include <QTimer>
+#include <QUrlQuery>
+#include <QJsonDocument>
 #include <QNetworkReply>
 #include <QNetworkRequest>
 #include <QNetworkAccessManager>
-#include <QUrlQuery>
-#include <QJsonDocument>
 
 UrlAttributes::UrlAttributes(QObject *parent) : QObject(parent) { }
 
@@ -35,7 +37,7 @@ void UrlAttributes::setUrl(const QUrl &val)
     m_url = val;
     emit urlChanged();
 
-    static QNetworkAccessManager nam;
+    NetworkAccessManager &nam = *NetworkAccessManager::instance();
     if (!m_reply.isNull())
         delete m_reply;
     m_reply = nullptr;
@@ -45,7 +47,7 @@ void UrlAttributes::setUrl(const QUrl &val)
         this->setStatus(Loading);
 
         static const QUrl url(
-                QStringLiteral("http://www.teriflix.in/scrite/urlattribs/urlattribs.php"));
+                QStringLiteral("https://www.scrite.io/helpers/urlattribs/urlattribs.php"));
         const QNetworkRequest request(url);
 
         QUrlQuery postData;

@@ -1,7 +1,7 @@
 /****************************************************************************
 **
-** Copyright (C) TERIFLIX Entertainment Spaces Pvt. Ltd. Bengaluru
-** Author: Prashanth N Udupa (prashanth.udupa@teriflix.com)
+** Copyright (C) VCreate Logic Pvt. Ltd. Bengaluru
+** Author: Prashanth N Udupa (prashanth@scrite.io)
 **
 ** This code is distributed under GPL v3. Complete text of the license
 ** can be found here: https://www.gnu.org/licenses/gpl-3.0.txt
@@ -39,7 +39,7 @@ Item {
     }
 
     Text {
-        text: "You're so close to writing your next blockbuster on Scrite!\nTo install Scrite, drag the icon to the Applications folder."
+        text: "You're so close to writing your next blockbuster on Scrite!\nDrag the Scrite icon to the Applications folder."
         horizontalAlignment: Text.AlignHCenter
         anchors.horizontalCenter: parent.horizontalCenter
         anchors.top: parent.verticalCenter
@@ -53,9 +53,9 @@ Item {
         text: "{{VERSION}}"
         font.pixelSize: 18
         font.family: "Rubik"
-        color: "white"
-        x: parent.width * 0.045
-        y: parent.height * 0.145
+        color: "black"
+        x: parent.width - width - 30
+        y: 55 - height/2
     }
 
     Timer {

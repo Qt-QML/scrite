@@ -1,7 +1,7 @@
 /****************************************************************************
 **
-** Copyright (C) TERIFLIX Entertainment Spaces Pvt. Ltd. Bengaluru
-** Author: Prashanth N Udupa (prashanth.udupa@teriflix.com)
+** Copyright (C) VCreate Logic Pvt. Ltd. Bengaluru
+** Author: Prashanth N Udupa (prashanth@scrite.io)
 **
 ** This code is distributed under GPL v3. Complete text of the license
 ** can be found here: https://www.gnu.org/licenses/gpl-3.0.txt
@@ -26,6 +26,7 @@ Item {
     property alias tabBarVisible: tabBar.visible
     property alias cornerItem: cornerLoader.sourceComponent
     property real cornerItemSpace: cornerLoader.width
+    property alias currentTabItem: tabContentLoader.item
 
     Row {
         id: tabBar
@@ -36,11 +37,11 @@ Item {
 
         Repeater {
             id: tabRepeater
-            model: tabNames
+            model: tabBar.visible ? tabNames : 0
 
             TabBarTab {
                 tabFillColor: active ? tabColor : Qt.tint(tabColor, "#C0FFFFFF")
-                tabBorderColor: tabColor
+                tabBorderColor: Scrite.app.isVeryLightColor(tabColor) ? "gray" : tabColor
                 tabBorderWidth: 1
                 text: modelData
                 tabIndex: index
@@ -79,7 +80,7 @@ Item {
         Rectangle {
             anchors.fill: tabContentLoader
             border.width: 1
-            border.color: tabBar.visible ? tabColor : primaryColors.borderColor
+            border.color: Scrite.app.isVeryLightColor(tabColor) ? primaryColors.windowColor : tabColor
             color: Qt.rgba(0,0,0,0)
         }
     }

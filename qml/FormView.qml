@@ -1,7 +1,7 @@
 /****************************************************************************
 **
-** Copyright (C) TERIFLIX Entertainment Spaces Pvt. Ltd. Bengaluru
-** Author: Prashanth N Udupa (prashanth.udupa@teriflix.com)
+** Copyright (C) VCreate Logic Pvt. Ltd. Bengaluru
+** Author: Prashanth N Udupa (prashanth@scrite.io)
 **
 ** This code is distributed under GPL v3. Complete text of the license
 ** can be found here: https://www.gnu.org/licenses/gpl-3.0.txt
@@ -160,6 +160,22 @@ Item {
                 id: formFieldsRepeater
                 model: formQuestionsModel
 
+                function switchToNextField(index) {
+                    if(index === count-1)
+                        return
+
+                    const item = itemAt(index+1)
+                    item.assumeFocus(0)
+                }
+
+                function switchToPreviousField(index) {
+                    if(index === 0)
+                        return
+
+                    const item = itemAt(index-1)
+                    item.assumeFocus(-1)
+                }
+
                 FormField {
                     anchors.right: parent.right
                     width: parent.width
@@ -198,6 +214,9 @@ Item {
                     property bool visibleToUser: Scrite.app.doRectanglesIntersect( Qt.rect(x,y,width,height),
                                                         Qt.rect(0,formFlickable.contentY,width,formFlickable.height) )
                     opacity: visibleToUser ? 1 : 0
+
+                    onFocusNextRequest: formFieldsRepeater.switchToNextField(index)
+                    onFocusPreviousRequest: formFieldsRepeater.switchToPreviousField(index)
                 }
             }
 

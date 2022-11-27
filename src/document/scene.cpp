@@ -1,7 +1,7 @@
 /****************************************************************************
 **
-** Copyright (C) TERIFLIX Entertainment Spaces Pvt. Ltd. Bengaluru
-** Author: Prashanth N Udupa (prashanth.udupa@teriflix.com)
+** Copyright (C) VCreate Logic Pvt. Ltd. Bengaluru
+** Author: Prashanth N Udupa (prashanth@scrite.io)
 **
 ** This code is distributed under GPL v3. Complete text of the license
 ** can be found here: https://www.gnu.org/licenses/gpl-3.0.txt
@@ -14,12 +14,14 @@
 #include "scene.h"
 #include "undoredo.h"
 #include "hourglass.h"
+#include "formatting.h"
 #include "application.h"
 #include "searchengine.h"
 #include "timeprofiler.h"
 #include "scritedocument.h"
 #include "garbagecollector.h"
 #include "qobjectserializer.h"
+#include "screenplaytextdocument.h"
 
 #include <QUuid>
 #include <QFuture>
@@ -37,13 +39,25 @@
 #include <QScopedValueRollback>
 #include <QAbstractTextDocumentLayout>
 
+static QDataStream &operator<<(QDataStream &ds, const QTextLayout::FormatRange &formatRange)
+{
+    ds << formatRange.start << formatRange.length << formatRange.format;
+    return ds;
+}
+
+static QDataStream &operator>>(QDataStream &ds, QTextLayout::FormatRange &formatRange)
+{
+    ds >> formatRange.start >> formatRange.length >> formatRange.format;
+    return ds;
+}
+
 class PushSceneUndoCommand;
 class SceneUndoCommand : public QUndoCommand
 {
 public:
     static SceneUndoCommand *current;
 
-    SceneUndoCommand(Scene *scene, bool allowMerging = true);
+    explicit SceneUndoCommand(Scene *scene, bool allowMerging = true);
     ~SceneUndoCommand();
 
     // QUndoCommand interface
@@ -182,7 +196,12 @@ SceneHeading::SceneHeading(QObject *parent)
     connect(this, &SceneHeading::enabledChanged, this, &SceneHeading::textChanged);
     connect(this, &SceneHeading::locationChanged, this, &SceneHeading::textChanged);
     connect(this, &SceneHeading::locationTypeChanged, this, &SceneHeading::textChanged);
-    connect(this, &SceneHeading::textChanged, [=]() { this->markAsModified(); });
+    connect(this, &SceneHeading::textChanged, [=]() {
+        this->markAsModified();
+        this->evaluateWordCountLater();
+    });
+    connect(this, &SceneHeading::wordCountChanged, m_scene, &Scene::evaluateWordCountLater,
+            Qt::UniqueConnection);
 }
 
 SceneHeading::~SceneHeading() { }
@@ -295,6 +314,15 @@ void SceneHeading::parseFrom(const QString &text)
     this->setMoment(_moment);
 }
 
+void SceneHeading::timerEvent(QTimerEvent *event)
+{
+    if (event->timerId() == m_wordCountTimer.timerId()) {
+        m_wordCountTimer.stop();
+        this->evaluateWordCount();
+    } else
+        QObject::timerEvent(event);
+}
+
 void SceneHeading::renameCharacter(const QString &from, const QString &to)
 {
     int nrReplacements = 0;
@@ -324,6 +352,26 @@ QString SceneHeading::toString(Mode mode) const
     return QString();
 }
 
+void SceneHeading::setWordCount(int val)
+{
+    if (m_wordCount == val)
+        return;
+
+    m_wordCount = val;
+    emit wordCountChanged();
+}
+
+void SceneHeading::evaluateWordCount()
+{
+    const QString text = this->toString(DisplayMode);
+    this->setWordCount(TransliterationEngine::wordCount(text));
+}
+
+void SceneHeading::evaluateWordCountLater()
+{
+    m_wordCountTimer.start(100, this);
+}
+
 ///////////////////////////////////////////////////////////////////////////////
 
 SceneElement::SceneElement(QObject *parent)
@@ -332,6 +380,10 @@ SceneElement::SceneElement(QObject *parent)
     connect(this, &SceneElement::typeChanged, this, &SceneElement::elementChanged);
     connect(this, &SceneElement::textChanged, this, &SceneElement::elementChanged);
     connect(this, &SceneElement::elementChanged, [=]() { this->markAsModified(); });
+
+    if (m_scene != nullptr)
+        connect(this, &SceneElement::wordCountChanged, m_scene, &Scene::evaluateWordCountLater,
+                Qt::UniqueConnection);
 }
 
 SceneElement::~SceneElement()
@@ -378,8 +430,7 @@ void SceneElement::setType(SceneElement::Type val)
     m_type = val;
     emit typeChanged();
 
-    if (m_scene != nullptr)
-        emit m_scene->sceneElementChanged(this, Scene::ElementTypeChange);
+    this->reportSceneElementChanged(Scene::ElementTypeChange);
 }
 
 QString SceneElement::typeAsString() const
@@ -419,8 +470,8 @@ void SceneElement::setText(const QString &val)
 
     emit textChanged(val);
 
-    if (m_scene != nullptr)
-        emit m_scene->sceneElementChanged(this, Scene::ElementTextChange);
+    this->reportSceneElementChanged(Scene::ElementTextChange);
+    this->evaluateWordCountLater();
 }
 
 void SceneElement::setCursorPosition(int val)
@@ -462,7 +513,14 @@ QJsonArray SceneElement::find(const QString &text, int flags) const
     return SearchEngine::indexesOf(text, m_text, flags);
 }
 
-void SceneElement::deserializeFromJson(const QJsonObject &)
+void SceneElement::serializeToJson(QJsonObject &json) const
+{
+    const QJsonArray jtextFormats = textFormatsToJson(m_textFormats);
+    if (!jtextFormats.isEmpty())
+        json.insert(QLatin1String("#textFormats"), jtextFormats);
+}
+
+void SceneElement::deserializeFromJson(const QJsonObject &json)
 {
     if (m_type == SceneElement::Character) {
         const int bo = m_text.indexOf(QStringLiteral("("));
@@ -470,18 +528,162 @@ void SceneElement::deserializeFromJson(const QJsonObject &)
             m_text.insert(bo, QChar(' '));
             emit textChanged(m_text);
 
-            if (m_scene != nullptr)
-                emit m_scene->sceneElementChanged(this, Scene::ElementTextChange);
+            this->reportSceneElementChanged(Scene::ElementTextChange);
         }
     }
+
+    const QJsonArray jtextFormats = json.value(QLatin1String("#textFormats")).toArray();
+    this->setTextFormats(textFormatsFromJson(jtextFormats));
+
+    this->evaluateWordCountLater();
+}
+
+void SceneElement::setTextFormats(const QVector<QTextLayout::FormatRange> &formats)
+{
+    if (m_textFormats == formats)
+        return;
+
+    PushSceneUndoCommand cmd(m_scene);
+
+    m_textFormats = formats;
+    emit elementChanged();
+
+    this->reportSceneElementChanged(Scene::ElementTextChange);
+}
+
+QJsonArray SceneElement::textFormatsToJson(const QVector<QTextLayout::FormatRange> &formats)
+{
+    QJsonArray jtextFormats;
+    for (const QTextLayout::FormatRange &formatRange : formats) {
+        const QTextCharFormat format = formatRange.format;
+
+        QJsonObject item;
+        item.insert(QLatin1String("start"), formatRange.start);
+        item.insert(QLatin1String("length"), formatRange.length);
+
+        QJsonObject attribs;
+        if (format.hasProperty(QTextFormat::FontWeight)) {
+            if (format.fontWeight() == QFont::Bold)
+                attribs.insert(QLatin1String("bold"), true);
+        }
+
+        if (format.hasProperty(QTextFormat::FontItalic)) {
+            if (format.fontItalic())
+                attribs.insert(QLatin1String("italics"), true);
+        }
+
+        if (format.hasProperty(QTextFormat::TextUnderlineStyle)) {
+            if (format.fontUnderline())
+                attribs.insert(QLatin1String("underline"), true);
+        }
+
+        if (format.hasProperty(QTextFormat::BackgroundBrush)) {
+            const QColor color = format.background().color();
+            if (!qFuzzyIsNull(color.alphaF()))
+                attribs.insert(QLatin1String("background"), color.name());
+        }
+
+        if (format.hasProperty(QTextFormat::ForegroundBrush)) {
+            const QColor color = format.foreground().color();
+            if (!qFuzzyIsNull(color.alphaF()))
+                attribs.insert(QLatin1String("foreground"), color.name());
+        }
+
+        if (attribs.isEmpty())
+            continue;
+
+        item.insert(QLatin1String("attribs"), attribs);
+        jtextFormats.append(item);
+    }
+
+    return jtextFormats;
+}
+
+QVector<QTextLayout::FormatRange> SceneElement::textFormatsFromJson(const QJsonArray &jtextFormats)
+{
+    QVector<QTextLayout::FormatRange> textFormats;
+
+    if (!jtextFormats.isEmpty()) {
+        textFormats.reserve(jtextFormats.size());
+
+        for (int i = 0; i < jtextFormats.size(); i++) {
+            const QJsonObject item = jtextFormats.at(i).toObject();
+
+            QTextLayout::FormatRange formatRange;
+
+            formatRange.start = item.value(QLatin1String("start")).toInt();
+            formatRange.length = item.value(QLatin1String("length")).toInt();
+
+            const QJsonObject attribs = item.value(QLatin1String("attribs")).toObject();
+
+            QTextCharFormat &format = formatRange.format;
+            if (attribs.value(QLatin1String("bold")).toBool())
+                format.setFontWeight(QFont::Bold);
+            if (attribs.value(QLatin1String("italics")).toBool())
+                format.setFontItalic(true);
+            if (attribs.value(QLatin1String("underline")).toBool())
+                format.setFontUnderline(true);
+
+            auto applyBrush = [&](int property, const QJsonValue &value) {
+                QColor color(Qt::transparent);
+
+                if (!value.isUndefined()) {
+                    const QString valueStr = value.toString();
+                    if (!valueStr.isEmpty()) {
+                        color = QColor(valueStr);
+                        if (!color.isValid())
+                            color = Qt::transparent;
+                    }
+                }
+
+                if (color != Qt::transparent)
+                    format.setProperty(property, QBrush(color));
+            };
+
+            applyBrush(QTextFormat::BackgroundBrush, attribs.value(QLatin1String("background")));
+            applyBrush(QTextFormat::ForegroundBrush, attribs.value(QLatin1String("foreground")));
+
+            if (format.isEmpty())
+                continue;
+
+            textFormats.append(formatRange);
+        }
+    }
+
+    return textFormats;
 }
 
 bool SceneElement::event(QEvent *event)
 {
-    if (event->type() == QEvent::ParentChange)
+    if (event->type() == QEvent::ParentChange) {
+        if (m_scene != nullptr)
+            disconnect(this, &SceneElement::wordCountChanged, m_scene,
+                       &Scene::evaluateWordCountLater);
         m_scene = qobject_cast<Scene *>(this->parent());
+        if (m_scene != nullptr)
+            connect(this, &SceneElement::wordCountChanged, m_scene, &Scene::evaluateWordCountLater,
+                    Qt::UniqueConnection);
+    }
 
     return QObject::event(event);
+}
+
+void SceneElement::timerEvent(QTimerEvent *event)
+{
+    if (event->timerId() == m_changeTimer.timerId()) {
+        m_changeTimer.stop();
+        if (m_scene != nullptr) {
+            if (m_changeCounters.take(Scene::ElementTypeChange) > 0)
+                emit m_scene->sceneElementChanged(this, Scene::ElementTypeChange);
+            if (m_changeCounters.take(Scene::ElementTextChange) > 0)
+                emit m_scene->sceneElementChanged(this, Scene::ElementTextChange);
+        }
+        m_changeCounters.clear();
+    } else if (event->timerId() == m_wordCountTimer.timerId()) {
+        m_wordCountTimer.stop();
+        this->evaluateWordCount();
+    } else
+        QObject::timerEvent(event);
 }
 
 void SceneElement::renameCharacter(const QString &from, const QString &to)
@@ -509,8 +711,35 @@ void SceneElement::renameCharacter(const QString &from, const QString &to)
         }
 
         emit textChanged(m_text);
-        emit m_scene->sceneElementChanged(this, Scene::ElementTextChange);
+        this->reportSceneElementChanged(Scene::ElementTextChange);
     }
+}
+
+void SceneElement::reportSceneElementChanged(int type)
+{
+    if (m_scene != nullptr) {
+        m_changeCounters[type]++;
+        m_changeTimer.start(0, this);
+    }
+}
+
+void SceneElement::setWordCount(int val)
+{
+    if (m_wordCount == val)
+        return;
+
+    m_wordCount = val;
+    emit wordCountChanged();
+}
+
+void SceneElement::evaluateWordCount()
+{
+    this->setWordCount(TransliterationEngine::wordCount(m_text));
+}
+
+void SceneElement::evaluateWordCountLater()
+{
+    m_wordCountTimer.start(100, this);
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -643,6 +872,7 @@ Scene::Scene(QObject *parent) : QAbstractListModel(parent)
     });
 
     connect(m_attachments, &Attachments::attachmentsModified, this, &Scene::sceneChanged);
+    this->evaluateWordCountLater();
 }
 
 Scene::~Scene()
@@ -865,7 +1095,7 @@ bool Scene::validatePageTarget(int pageNumber) const
         return false;
 
     const QStringList fields = m_pageTarget.split(QStringLiteral(","), Qt::SkipEmptyParts);
-    for (QString field : fields) {
+    for (const QString &field : fields) {
         const QStringList nos = field.trimmed().split(QStringLiteral("-"), Qt::SkipEmptyParts);
         if (nos.isEmpty())
             continue;
@@ -1017,8 +1247,8 @@ void Scene::scanMuteCharacters(const QStringList &characterNames)
                     }
                 }
 
-                bool found = (pos + name.length() >= text.length());
-                if (!found) {
+                bool found = false;
+                if (text.length() >= pos + name.length()) {
                     const QChar ch = text.at(pos + name.length());
                     found = ch.isPunct() || ch.isSpace();
                 }
@@ -1511,6 +1741,7 @@ QByteArray Scene::toByteArray() const
         ds << element->id();
         ds << int(element->type());
         ds << element->text();
+        ds << element->textFormats();
     }
 
     return bytes;
@@ -1563,6 +1794,7 @@ bool Scene::resetFromByteArray(const QByteArray &bytes)
         QString id;
         int type = SceneElement::Action;
         QString text;
+        QVector<QTextLayout::FormatRange> formats;
     };
     QVector<_Paragraph> paragraphs;
     QStringList paragraphIds;
@@ -1573,6 +1805,7 @@ bool Scene::resetFromByteArray(const QByteArray &bytes)
         ds >> e.id;
         ds >> e.type;
         ds >> e.text;
+        ds >> e.formats;
         paragraphIds.append(e.id);
         paragraphs.append(e);
     }
@@ -1592,6 +1825,7 @@ bool Scene::resetFromByteArray(const QByteArray &bytes)
         if (element && element->id() == para.id) {
             element->setType(SceneElement::Type(para.type));
             element->setText(para.text);
+            element->setTextFormats(para.formats);
             continue;
         }
 
@@ -1599,6 +1833,7 @@ bool Scene::resetFromByteArray(const QByteArray &bytes)
         element->setId(para.id);
         element->setType(SceneElement::Type(para.type));
         element->setText(para.text);
+        element->setTextFormats(para.formats);
         this->insertElementAt(element, i);
     }
 
@@ -1649,14 +1884,39 @@ void Scene::serializeToJson(QJsonObject &json) const
         json.insert(QStringLiteral("#invisibleCharacters"), invisibleCharacters);
 }
 
+class AddInvisibleCharactersTimer : public QTimer
+{
+public:
+    explicit AddInvisibleCharactersTimer(const QJsonArray &chars, Scene *parent)
+        : QTimer(parent), m_scene(parent), m_characters(chars)
+    {
+        this->setInterval(100);
+        this->setSingleShot(true);
+        connect(this, &QTimer::timeout, this, &AddInvisibleCharactersTimer::itsTime);
+        this->start();
+    }
+
+    ~AddInvisibleCharactersTimer() { }
+
+private:
+    void itsTime()
+    {
+        for (int i = 0; i < m_characters.size(); i++)
+            m_scene->addMuteCharacter(m_characters.at(i).toString());
+        this->deleteLater();
+    }
+
+private:
+    Scene *m_scene;
+    QJsonArray m_characters;
+};
+
 void Scene::deserializeFromJson(const QJsonObject &json)
 {
     const QJsonArray invisibleCharacters =
             json.value(QStringLiteral("#invisibleCharacters")).toArray();
-    if (!invisibleCharacters.isEmpty()) {
-        for (int i = 0; i < invisibleCharacters.size(); i++)
-            this->addMuteCharacter(invisibleCharacters.at(i).toString());
-    }
+    if (!invisibleCharacters.isEmpty())
+        new AddInvisibleCharactersTimer(invisibleCharacters, this);
 
     // Previously notes was an array, because the notes property used to be
     // a list property. Now notes is an object, because it represents Notes class.
@@ -1665,6 +1925,8 @@ void Scene::deserializeFromJson(const QJsonObject &json)
     const QJsonValue notes = json.value(QStringLiteral("notes"));
     if (notes.isArray())
         m_notes->loadOldNotes(notes.toArray());
+
+    this->evaluateWordCountLater();
 }
 
 bool Scene::canSetPropertyFromObjectList(const QString &propName) const
@@ -1683,6 +1945,170 @@ void Scene::setPropertyFromObjectList(const QString &propName, const QList<QObje
     }
 }
 
+void Scene::write(QTextCursor &cursor, const WriteOptions &options) const
+{
+    /**
+     * Although much of the code below is similar to what ScreenplayTextDocument does,
+     * I want for this to be distinct - even at the cost of code duplication.
+     *
+     * The purpose of this method is to participate in the notebook report. So, we don't
+     * need this to fit screenplay formatting as much as ScreenplayTextDocument does.
+     */
+
+    static const QRegularExpression newlinesRegEx("\n+");
+    static const QString newline = QStringLiteral("\n");
+    QTextDocument *textDocument = cursor.document();
+
+    if (m_title.isEmpty() && m_comments.isEmpty() && (m_notes == nullptr || m_notes->isEmpty()))
+        return;
+
+    // Scene number: heading
+    if (options.includeHeading) {
+        const QString heading = m_structureElement->title().trimmed();
+
+        if (!heading.isEmpty()) {
+            QTextBlockFormat headingBlockFormat;
+            headingBlockFormat.setHeadingLevel(options.headingLevel);
+            QTextCharFormat headingCharFormat;
+            headingCharFormat.setFontWeight(QFont::Bold);
+            headingCharFormat.setFontPointSize(
+                    ScreenplayTextDocument::headingFontPointSize(options.headingLevel));
+            headingBlockFormat.setTopMargin(headingCharFormat.fontPointSize() / 2);
+            if (cursor.block().text().isEmpty()) {
+                cursor.setBlockFormat(headingBlockFormat);
+                cursor.setBlockCharFormat(headingCharFormat);
+            } else
+                cursor.insertBlock(headingBlockFormat, headingCharFormat);
+            cursor.insertText(m_structureElement->title());
+        }
+    }
+
+    // Featured Photo
+    if (options.includeFeaturedPhoto) {
+        const Attachments *sceneAttachments = m_attachments;
+        const Attachment *featuredAttachment =
+                sceneAttachments ? sceneAttachments->featuredAttachment() : nullptr;
+        const Attachment *featuredImage =
+                featuredAttachment && featuredAttachment->type() == Attachment::Photo
+                ? featuredAttachment
+                : nullptr;
+
+        if (featuredImage) {
+            const QUrl url(QStringLiteral("scrite://") + featuredImage->filePath());
+            const QImage image(featuredImage->fileSource().toLocalFile());
+
+            textDocument->addResource(QTextDocument::ImageResource, url,
+                                      QVariant::fromValue<QImage>(image));
+
+            const QSizeF imageSize = image.size().scaled(QSize(320, 240), Qt::KeepAspectRatio);
+
+            QTextBlockFormat blockFormat;
+            blockFormat.setTopMargin(5);
+            cursor.insertBlock(blockFormat);
+
+            QTextImageFormat imageFormat;
+            imageFormat.setName(url.toString());
+            imageFormat.setWidth(imageSize.width());
+            imageFormat.setHeight(imageSize.height());
+            cursor.insertImage(imageFormat);
+        }
+    }
+
+    // Synopsis
+    if (options.includeSynopsis) {
+        QString synopsis = this->title().trimmed();
+        synopsis.replace(newlinesRegEx, newline);
+
+        if (!synopsis.isEmpty()) {
+            QColor sceneColor = this->color().lighter(175);
+            sceneColor.setAlphaF(0.5);
+
+            QTextBlockFormat blockFormat;
+            blockFormat.setTopMargin(5);
+            blockFormat.setIndent(2);
+            blockFormat.setBackground(sceneColor);
+
+            QTextCharFormat charFormat;
+            charFormat.setFont(textDocument->defaultFont());
+
+            cursor.insertBlock(blockFormat, charFormat);
+
+            TransliterationUtils::polishFontsAndInsertTextAtCursor(cursor, synopsis);
+        }
+    }
+
+    // Comments
+    if (options.includeComments) {
+        QString comments = this->comments().trimmed();
+        if (!comments.isEmpty()) {
+            comments.replace(newlinesRegEx, newline);
+
+            comments = QLatin1String("Comments: ") + comments;
+
+            QColor sceneColor = this->color().lighter(175);
+            sceneColor.setAlphaF(0.5);
+
+            QTextBlockFormat blockFormat;
+            blockFormat.setTopMargin(5);
+            blockFormat.setLeftMargin(15);
+            blockFormat.setRightMargin(15);
+            blockFormat.setBackground(sceneColor);
+
+            QTextCharFormat charFormat;
+            charFormat.setFont(textDocument->defaultFont());
+
+            cursor.insertBlock(blockFormat, charFormat);
+            TransliterationUtils::polishFontsAndInsertTextAtCursor(cursor, comments);
+        }
+    }
+
+    // Heading + Content
+    if (options.includeContent) {
+        QTextFrame *rootFrame = cursor.currentFrame();
+        ScreenplayFormat *printFormat = ScriteDocument::instance()->printFormat();
+
+        QTextFrameFormat sceneFrameFormat;
+        sceneFrameFormat.setBorder(1);
+        sceneFrameFormat.setBorderStyle(QTextFrameFormat::BorderStyle_Solid);
+        cursor.insertFrame(sceneFrameFormat);
+
+        if (m_heading && m_heading->isEnabled()) {
+            SceneElementFormat *headingParaFormat =
+                    printFormat->elementFormat(SceneElement::Heading);
+            const QTextBlockFormat headingParaBlockFormat = headingParaFormat->createBlockFormat();
+            const QTextCharFormat headingParaCharFormat = headingParaFormat->createCharFormat();
+            cursor.setBlockFormat(headingParaBlockFormat);
+            cursor.setBlockCharFormat(headingParaCharFormat);
+            TransliterationUtils::polishFontsAndInsertTextAtCursor(cursor, m_heading->text());
+            cursor.insertBlock();
+        }
+
+        for (SceneElement *para : m_elements) {
+            SceneElementFormat *paraFormat = printFormat->elementFormat(para->type());
+            const QTextBlockFormat paraBlockFormat = paraFormat->createBlockFormat();
+            const QTextCharFormat paraCharFormat = paraFormat->createCharFormat();
+            cursor.setBlockFormat(paraBlockFormat);
+            cursor.setBlockCharFormat(paraCharFormat);
+            TransliterationUtils::polishFontsAndInsertTextAtCursor(cursor, para->text(),
+                                                                   para->textFormats());
+            if (para != m_elements.last())
+                cursor.insertBlock();
+        }
+
+        cursor = rootFrame->lastCursorPosition();
+    }
+
+    // Text and Form Notes
+    if (options.includeTextNotes || options.includeFormNotes) {
+        if (m_notes) {
+            Notes::WriteOptions notesOptions;
+            notesOptions.includeFormNotes = options.includeFormNotes;
+            notesOptions.includeTextNotes = options.includeTextNotes;
+            m_notes->write(cursor, notesOptions);
+        }
+    }
+}
+
 bool Scene::event(QEvent *event)
 {
     if (m_structureElement == nullptr && event->type() == QEvent::ParentChange) {
@@ -1691,6 +2117,15 @@ bool Scene::event(QEvent *event)
     }
 
     return QObject::event(event);
+}
+
+void Scene::timerEvent(QTimerEvent *event)
+{
+    if (event->timerId() == m_wordCountTimer.timerId()) {
+        m_wordCountTimer.stop();
+        this->evaluateWordCount();
+    } else
+        QObject::timerEvent(event);
 }
 
 void Scene::setStructureElement(StructureElement *ptr)
@@ -1832,6 +2267,33 @@ void Scene::evaluateSortedCharacterNames()
         m_sortedCharacterNames = names;
 
     emit characterNamesChanged();
+}
+
+void Scene::setWordCount(int val)
+{
+    if (m_wordCount == val)
+        return;
+
+    m_wordCount = val;
+    emit wordCountChanged();
+}
+
+void Scene::evaluateWordCount()
+{
+    int wordCount = 0;
+
+    if (m_heading->isEnabled())
+        wordCount += m_heading->wordCount();
+
+    for (const SceneElement *element : qAsConst(m_elements))
+        wordCount += element->wordCount();
+
+    this->setWordCount(wordCount);
+}
+
+void Scene::evaluateWordCountLater()
+{
+    m_wordCountTimer.start(100, this);
 }
 
 void Scene::staticAppendElement(QQmlListProperty<SceneElement> *list, SceneElement *ptr)

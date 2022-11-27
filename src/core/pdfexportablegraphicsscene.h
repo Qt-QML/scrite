@@ -1,7 +1,7 @@
 /****************************************************************************
 **
-** Copyright (C) TERIFLIX Entertainment Spaces Pvt. Ltd. Bengaluru
-** Author: Prashanth N Udupa (prashanth.udupa@teriflix.com)
+** Copyright (C) VCreate Logic Pvt. Ltd. Bengaluru
+** Author: Prashanth N Udupa (prashanth@scrite.io)
 **
 ** This code is distributed under GPL v3. Complete text of the license
 ** can be found here: https://www.gnu.org/licenses/gpl-3.0.txt
@@ -26,7 +26,7 @@ class PdfExportableGraphicsScene : public QGraphicsScene
     Q_OBJECT
 
 public:
-    PdfExportableGraphicsScene(QObject *parent = nullptr);
+    explicit PdfExportableGraphicsScene(QObject *parent = nullptr);
     ~PdfExportableGraphicsScene();
 
     Q_PROPERTY(QString title READ title WRITE setTitle NOTIFY titleChanged)
@@ -69,8 +69,8 @@ private:
 class GraphicsHeaderFooterItem : public QGraphicsItem
 {
 public:
-    GraphicsHeaderFooterItem(HeaderFooter *headerFooter,
-                             const QMap<HeaderFooter::Field, QString> &fields);
+    explicit GraphicsHeaderFooterItem(HeaderFooter *headerFooter,
+                                      const QMap<HeaderFooter::Field, QString> &fields);
     ~GraphicsHeaderFooterItem();
 
     void setRect(const QRectF &rect);
@@ -89,7 +89,7 @@ private:
 class GraphicsWatermarkItem : public QGraphicsItem
 {
 public:
-    GraphicsWatermarkItem(Watermark *watermark);
+    explicit GraphicsWatermarkItem(Watermark *watermark);
     ~GraphicsWatermarkItem();
 
     void setRect(const QRectF &rect);
@@ -107,7 +107,8 @@ private:
 class GraphicsHeaderItem : public QGraphicsRectItem
 {
 public:
-    GraphicsHeaderItem(const QString &title, const QString &subtitle, qreal containerWidth);
+    explicit GraphicsHeaderItem(const QString &title, const QString &subtitle,
+                                qreal containerWidth);
     ~GraphicsHeaderItem();
 
     static qreal idealContainerWidth(const QString &title);
@@ -116,8 +117,13 @@ public:
 class GraphicsImageRectItem : public QGraphicsRectItem
 {
 public:
-    GraphicsImageRectItem(QGraphicsItem *parent = nullptr);
+    explicit GraphicsImageRectItem(QGraphicsItem *parent = nullptr);
     ~GraphicsImageRectItem();
+
+    enum FillMode { Stretch, PreserveAspectFit, PreserveAspectCrop };
+
+    void setFillMode(FillMode val);
+    FillMode fillMode() const { return m_fillMode; }
 
     void setImage(const QImage &image) { m_image = image; }
     QImage image() const { return m_image; }
@@ -126,6 +132,7 @@ public:
 
 private:
     QImage m_image;
+    FillMode m_fillMode = PreserveAspectCrop;
 };
 
 #endif // PDFEXPORTABLEGRAPHICSSCENE_H

@@ -1,7 +1,7 @@
 /****************************************************************************
 **
-** Copyright (C) TERIFLIX Entertainment Spaces Pvt. Ltd. Bengaluru
-** Author: Prashanth N Udupa (prashanth.udupa@teriflix.com)
+** Copyright (C) VCreate Logic Pvt. Ltd. Bengaluru
+** Author: Prashanth N Udupa (prashanth@scrite.io)
 **
 ** This code is distributed under GPL v3. Complete text of the license
 ** can be found here: https://www.gnu.org/licenses/gpl-3.0.txt
@@ -14,6 +14,7 @@
 import QtQml 2.15
 import QtQuick 2.15
 import QtQuick.Window 2.15
+import QtQuick.Controls 2.15
 
 import io.scrite.components 1.0
 
@@ -27,7 +28,7 @@ Item {
 
     Item {
         id: splashImageArea
-        width: Math.min(ui.width * 0.6, splashImage.sourceSize.width)
+        width: Math.min(ui.width * 0.7, splashImage.sourceSize.width)
         height: width / 2.35
         anchors.centerIn: parent
         clip: true
@@ -43,11 +44,11 @@ Item {
 
         Text {
             id: versionText
-            x: (1018 / splashImage.sourceSize.width) * parent.width
-            y: (187 / splashImage.sourceSize.height) * parent.height
-            font.pixelSize: Scrite.app.idealFontPointSize + 3
+            x: parent.width - width - ((35 / splashImage.sourceSize.height) * parent.height)
+            y: (750 / splashImage.sourceSize.height) * parent.height
+            font.pixelSize: Scrite.app.idealFontPointSize + 1
             text: Scrite.app.applicationVersion
-            color: "#4a4a4a"
+            color: "white"
         }
 
         SequentialAnimation {
@@ -126,5 +127,15 @@ Item {
             done()
         result.acceptEvent = true
         result.filter = true
+    }
+
+    Label {
+        anchors.centerIn: parent
+        text: "Welcome to Scrite"
+        Component.onCompleted: {
+            if(Scrite.app.customFontPointSize === 0)
+                Scrite.app.customFontPointSize = font.pointSize
+            visible = false
+        }
     }
 }

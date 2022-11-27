@@ -1,7 +1,7 @@
 /****************************************************************************
 **
-** Copyright (C) TERIFLIX Entertainment Spaces Pvt. Ltd. Bengaluru
-** Author: Prashanth N Udupa (prashanth.udupa@teriflix.com)
+** Copyright (C) VCreate Logic Pvt. Ltd. Bengaluru
+** Author: Prashanth N Udupa (prashanth@scrite.io)
 **
 ** This code is distributed under GPL v3. Complete text of the license
 ** can be found here: https://www.gnu.org/licenses/gpl-3.0.txt
@@ -17,13 +17,13 @@
 #include <QList>
 #include <QThread>
 
-#ifndef QT_NO_DEBUG
+#ifndef QT_NO_DEBUG_OUTPUT
 Q_GLOBAL_STATIC(QList<ExecLaterTimer *>, ExecLaterTimerList)
 #endif
 
 ExecLaterTimer *ExecLaterTimer::get(int timerId)
 {
-#ifndef QT_NO_DEBUG
+#ifndef QT_NO_DEBUG_OUTPUT
     for (ExecLaterTimer *timer : qAsConst(*ExecLaterTimerList)) {
         if (timer->timerId() == timerId)
             return timer;
@@ -37,7 +37,7 @@ ExecLaterTimer *ExecLaterTimer::get(int timerId)
 
 ExecLaterTimer::ExecLaterTimer(const QString &name, QObject *parent) : QObject(parent), m_name(name)
 {
-#ifndef QT_NO_DEBUG
+#ifndef QT_NO_DEBUG_OUTPUT
     ExecLaterTimerList->append(this);
 #endif
 
@@ -51,7 +51,7 @@ ExecLaterTimer::~ExecLaterTimer()
     m_destroyed = true;
     this->stop();
 
-#ifndef QT_NO_DEBUG
+#ifndef QT_NO_DEBUG_OUTPUT
     ExecLaterTimerList->removeOne(this);
 #endif
 }
@@ -155,7 +155,7 @@ void ExecLaterTimer::call(const char *name, const std::function<void()> &func, i
 void ExecLaterTimer::onTimeout()
 {
     if (m_object != nullptr && m_timerId >= 0) {
-#ifndef QT_NO_DEBUG
+#ifndef QT_NO_DEBUG_OUTPUT
         qDebug() << "Posting Timer [" << m_name << "]." << m_timerId << " to " << m_object;
 #endif
         qApp->postEvent(m_object, new QTimerEvent(m_timerId));

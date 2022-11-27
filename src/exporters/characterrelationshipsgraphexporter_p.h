@@ -1,7 +1,7 @@
 /****************************************************************************
 **
-** Copyright (C) TERIFLIX Entertainment Spaces Pvt. Ltd. Bengaluru
-** Author: Prashanth N Udupa (prashanth.udupa@teriflix.com)
+** Copyright (C) VCreate Logic Pvt. Ltd. Bengaluru
+** Author: Prashanth N Udupa (prashanth@scrite.io)
 **
 ** This code is distributed under GPL v3. Complete text of the license
 ** can be found here: https://www.gnu.org/licenses/gpl-3.0.txt
@@ -17,33 +17,33 @@
 #include <QGraphicsRectItem>
 
 #include "pdfexportablegraphicsscene.h"
-#include "characterrelationshipsgraph.h"
+#include "characterrelationshipgraph.h"
 
 class CharacterRelationshipsGraphScene : public PdfExportableGraphicsScene
 {
 public:
-    CharacterRelationshipsGraphScene(const CharacterRelationshipsGraph *graph,
-                                     QObject *parent = nullptr);
+    explicit CharacterRelationshipsGraphScene(const CharacterRelationshipGraph *graph,
+                                              QObject *parent = nullptr);
     ~CharacterRelationshipsGraphScene();
 };
 
 class CharacterRelationshipsGraphNodeItem : public QGraphicsRectItem
 {
 public:
-    CharacterRelationshipsGraphNodeItem(const CharacterRelationshipsGraphNode *node);
+    explicit CharacterRelationshipsGraphNodeItem(const CharacterRelationshipGraphNode *node);
     ~CharacterRelationshipsGraphNodeItem();
 
     // QGraphicsItem interface
     void paint(QPainter *painter, const QStyleOptionGraphicsItem *option, QWidget *widget);
 
 private:
-    const CharacterRelationshipsGraphNode *m_node;
+    const CharacterRelationshipGraphNode *m_node;
 };
 
 class CharacterRelationshipsGraphEdgeItem : public QGraphicsPathItem
 {
 public:
-    CharacterRelationshipsGraphEdgeItem(const CharacterRelationshipsGraphEdge *edge);
+    explicit CharacterRelationshipsGraphEdgeItem(const CharacterRelationshipGraphEdge *edge);
     ~CharacterRelationshipsGraphEdgeItem();
 };
 

@@ -1,7 +1,7 @@
 /****************************************************************************
 **
-** Copyright (C) TERIFLIX Entertainment Spaces Pvt. Ltd. Bengaluru
-** Author: Prashanth N Udupa (prashanth.udupa@teriflix.com)
+** Copyright (C) VCreate Logic Pvt. Ltd. Bengaluru
+** Author: Prashanth N Udupa (prashanth@scrite.io)
 **
 ** This code is distributed under GPL v3. Complete text of the license
 ** can be found here: https://www.gnu.org/licenses/gpl-3.0.txt
@@ -76,7 +76,7 @@ private:
     // URL has to be a http location always. Otherwise we will have to bundle
     // SSL libraries along with the installer and there are some legal bits
     // to consider before we are able to do that.
-    QUrl m_url = QUrl("http://www.teriflix.in/scrite/latest_release.json");
+    QUrl m_url = QUrl("https://www.scrite.io/helpers/latest_release.json");
     QJsonObject m_updateInfo;
     QJsonObject m_surveyInfo;
     ExecLaterTimer m_updateTimer;

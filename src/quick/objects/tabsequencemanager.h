@@ -1,7 +1,7 @@
 /****************************************************************************
 **
-** Copyright (C) TERIFLIX Entertainment Spaces Pvt. Ltd. Bengaluru
-** Author: Prashanth N Udupa (prashanth.udupa@teriflix.com)
+** Copyright (C) VCreate Logic Pvt. Ltd. Bengaluru
+** Author: Prashanth N Udupa (prashanth@scrite.io)
 **
 ** This code is distributed under GPL v3. Complete text of the license
 ** can be found here: https://www.gnu.org/licenses/gpl-3.0.txt
@@ -19,7 +19,7 @@
 
 #include "execlatertimer.h"
 #include "qobjectproperty.h"
-#include "objectlistpropertymodel.h"
+#include "qobjectlistmodel.h"
 
 class TabSequenceItem;
 class TabSequenceManager : public QObject
@@ -28,8 +28,13 @@ class TabSequenceManager : public QObject
     QML_ELEMENT
 
 public:
-    TabSequenceManager(QObject *parent = nullptr);
+    explicit TabSequenceManager(QObject *parent = nullptr);
     ~TabSequenceManager();
+
+    Q_PROPERTY(bool enabled READ isEnabled WRITE setEnabled NOTIFY enabledChanged)
+    void setEnabled(bool val);
+    bool isEnabled() const { return m_enabled; }
+    Q_SIGNAL void enabledChanged();
 
     Q_PROPERTY(int tabKey READ tabKey WRITE setTabKey NOTIFY tabKeyChanged)
     void setTabKey(int val);
@@ -71,6 +76,11 @@ public:
     bool isWrapAround() const { return m_wrapAround; }
     Q_SIGNAL void wrapAroundChanged();
 
+    Q_PROPERTY(QObject* currentItem READ currentItemObject NOTIFY currentItemChanged)
+    TabSequenceItem *currentItem() const { return m_currentItem; }
+    QObject *currentItemObject() const;
+    Q_SIGNAL void currentItemChanged();
+
     Q_INVOKABLE void assumeFocus() { this->assumeFocusAt(0); }
     Q_INVOKABLE void assumeFocusAt(int index);
     Q_INVOKABLE void releaseFocus();
@@ -84,6 +94,7 @@ private:
     bool switchFocus(int by = 1);
     bool switchFocusFrom(int fromItemIndex, int by = 1);
     int fetchItemIndex(int from, int direction, bool enabledOnly = true) const;
+    void setCurrentItem(TabSequenceItem *val);
 
 protected:
     void timerEvent(QTimerEvent *te);
@@ -99,6 +110,7 @@ private:
 
 private:
     friend class TabSequenceItem;
+    bool m_enabled = true;
     bool m_wrapAround = false;
     int m_insertCounter = 0;
     ExecLaterTimer m_timer;
@@ -110,6 +122,7 @@ private:
     QList<TabSequenceItem *> m_tabSequenceItems;
     int m_releaseFocusKey = Qt::Key_Escape;
     bool m_releaseFocusEnabled = false;
+    TabSequenceItem *m_currentItem = nullptr;
 };
 
 class TabSequenceItem : public QObject
@@ -129,7 +142,7 @@ public:
     bool isEnabled() const { return m_enabled; }
     Q_SIGNAL void enabledChanged();
 
-    Q_PROPERTY(TabSequenceManager* manager READ manager WRITE setManager NOTIFY managerChanged RESET resetManager)
+    Q_PROPERTY(TabSequenceManager *manager READ manager WRITE setManager NOTIFY managerChanged RESET resetManager)
     void setManager(TabSequenceManager *val);
     TabSequenceManager *manager() const { return m_manager; }
     Q_SIGNAL void managerChanged();
@@ -153,6 +166,7 @@ protected:
     TabSequenceItem(QObject *parent = nullptr);
     void resetManager();
     void resetKeyNavigationObject();
+    void onQmlItemFocusChanged();
 
 private:
     void setInsertIndex(int index) { m_insertIndex = index; }

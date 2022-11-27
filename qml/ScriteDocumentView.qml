@@ -1,7 +1,7 @@
 /****************************************************************************
 **
-** Copyright (C) TERIFLIX Entertainment Spaces Pvt. Ltd. Bengaluru
-** Author: Prashanth N Udupa (prashanth.udupa@teriflix.com)
+** Copyright (C) VCreate Logic Pvt. Ltd. Bengaluru
+** Author: Prashanth N Udupa (prashanth@scrite.io)
 **
 ** This code is distributed under GPL v3. Complete text of the license
 ** can be found here: https://www.gnu.org/licenses/gpl-3.0.txt
@@ -122,7 +122,7 @@ Item {
         property int mainEditorZoomValue: -1
         property int embeddedEditorZoomValue: -1
         property bool includeTitlePageInPreview: true
-        property bool enableSpellCheck: false // until we can fix https://github.com/teriflix/scrite/issues/138
+        property bool enableSpellCheck: true // Since this is now fixed: https://github.com/teriflix/scrite/issues/138
         property int lastLanguageRefreshNoticeBoxTimestamp: 0
         property int lastSpellCheckRefreshNoticeBoxTimestamp: 0
         property bool showLanguageRefreshNoticeBox: true
@@ -130,9 +130,8 @@ Item {
         property bool showLoglineEditor: false
         property bool allowTaggingOfScenes: false
         property real spaceBetweenScenes: 0
-
-        property real textFormatDockWidgetX: -1
-        property real textFormatDockWidgetY: -1
+        property int commentsPanelTabIndex: 1
+        property bool textFormatDockVisible: true
 
         property bool pausePageAndTimeComputation: false
         property bool highlightCurrentLine: true
@@ -161,6 +160,32 @@ Item {
         property int graphLayoutMaxTime: 1000
         property int graphLayoutMaxIterations: 50000
         property bool showAllFormQuestions: true
+    }
+
+    Settings {
+        id: helpNotificationSettings
+        fileName: Scrite.app.settingsFilePath
+        category: "Help"
+
+        property string dayZero
+        function daysSinceZero() {
+            const today = new Date()
+            const dzero = dayZero === "" ? today : new Date(dayZero + "Z")
+            const days = Math.floor((today.getTime() - dzero.getTime()) / (24*60*60*1000))
+            return days
+        }
+
+        property string tipsShown: ""
+        function isTipShown(val) {
+            const ts = tipsShown.split(",")
+            return ts.indexOf(val) >= 0
+        }
+        function markTipAsShown(val) {
+            var ts = tipsShown.length > 0 ? tipsShown.split(",") : []
+            if(ts.indexOf(val) < 0)
+                ts.push(val)
+            tipsShown = ts.join(",")
+        }
     }
 
     Shortcut {
@@ -379,11 +404,11 @@ Item {
         target: Scrite.document
         function onJustReset() {
             instanceSettings.firstSwitchToStructureTab = true
-            appBusyOverlay.refCount = appBusyOverlay.refCount+1
+            appBusyOverlay.ref()
             screenplayAdapter.initialLoadTreshold = 25
             Scrite.app.execLater(screenplayAdapter, 250, function() {
+                appBusyOverlay.deref()
                 screenplayAdapter.sessionId = Scrite.document.sessionId
-                appBusyOverlay.refCount = Math.max(appBusyOverlay.refCount-1,0)
             })
         }
         function onJustLoaded() {
@@ -447,13 +472,13 @@ Item {
         property bool overlayRefCountModified: false
         onUpdateScheduled: {
             if(mainUndoStack.screenplayEditorActive || mainUndoStack.sceneEditorActive) {
-                appBusyOverlay.refCount = appBusyOverlay.refCount+1
+                appBusyOverlay.ref()
                 overlayRefCountModified = true
             }
         }
         onUpdateFinished: {
             if(overlayRefCountModified)
-                appBusyOverlay.refCount = Math.max(appBusyOverlay.refCount-1,0)
+                appBusyOverlay.deref()
             overlayRefCountModified = false
         }
         Component.onCompleted: Scrite.app.registerObject(screenplayTextDocument, "screenplayTextDocument")
@@ -1159,6 +1184,8 @@ Item {
                                 property string tabs: Scrite.app.isWindowsPlatform ? (modelData.value === TransliterationEngine.Malayalam ? "\t" : "\t\t") : "\t\t"
                                 text: baseText + tabs + "" + Scrite.app.polishShortcutTextForDisplay("Alt+"+shortcutKey)
                                 font.bold: Scrite.app.transliterationEngine.language === modelData.value
+                                focusPolicy: Qt.NoFocus
+                                enabled: Scrite.app.transliterationEngine.enabledLanguages.indexOf(modelData.value) >= 0
                                 onClicked: {
                                     Scrite.app.transliterationEngine.language = modelData.value
                                     Scrite.document.formatting.defaultLanguage = modelData.value
@@ -1167,10 +1194,13 @@ Item {
                             }
                         }
 
-                        MenuSeparator { }
+                        MenuSeparator {
+                            focusPolicy: Qt.NoFocus
+                        }
 
                         MenuItem2 {
                             text: "Next-Language\tF10"
+                            focusPolicy: Qt.NoFocus
                             onClicked: {
                                 Scrite.app.transliterationEngine.cycleLanguage()
                                 Scrite.document.formatting.defaultLanguage = Scrite.app.transliterationEngine.language
@@ -1192,8 +1222,10 @@ Item {
                                     Scrite.document.formatting.defaultLanguage = modelData.value
                                     paragraphLanguageSettings.defaultLanguage = modelData.key
                                 }
+                                enabled: Scrite.app.transliterationEngine.enabledLanguages.indexOf(modelData.value) >= 0
 
                                 ShortcutsModelItem.priority: 0
+                                ShortcutsModelItem.enabled: enabled
                                 ShortcutsModelItem.title: modelData.key
                                 ShortcutsModelItem.group: "Language"
                                 ShortcutsModelItem.shortcut: sequence
@@ -1215,6 +1247,11 @@ Item {
                         ShortcutsModelItem.group: "Language"
                         ShortcutsModelItem.shortcut: "F10"
                     }
+                }
+
+                HelpTipNotification {
+                    tipName: Scrite.app.isWindowsPlatform ? "language_windows" : (Scrite.app.isMacOSPlatform ? "language_macos" : "language_linux")
+                    enabled: Scrite.app.transliterationEngine.language !== TransliterationEngine.English
                 }
             }
 
@@ -1712,6 +1749,22 @@ Item {
 
         property bool allowContent: true
         property string sessionId
+
+        function toggleCanvasUI() {
+            if(Scrite.document.structure.canvasUIMode === Structure.IndexCardUI)
+                Scrite.document.structure.canvasUIMode = Structure.SynopsisEditorUI
+            else
+                Scrite.document.structure.canvasUIMode = Structure.IndexCardUI
+        }
+
+        function reset(callback) {
+            active = false
+            Qt.callLater( (callback) => {
+                             if(callback)
+                                 callback()
+                             contentLoader.active = true
+                         }, callback )
+        }
     }
 
     Rectangle {
@@ -1916,6 +1969,10 @@ Item {
         id: screenplayEditorComponent
 
         ScreenplayEditor {
+            HelpTipNotification {
+                tipName: "screenplay"
+            }
+
             // zoomLevelModifier: mainTabBar.currentIndex > 0 ? -3 : 0
             Component.onCompleted: {
                 const evalZoomLevelModifierFn = () => {
@@ -2117,7 +2174,12 @@ Item {
                                 anchors.bottom: parent.bottom
                                 visible: !showNotebookInStructure || structureEditorTabs.currentTabIndex === 0
                                 active: structureAppFeature.enabled
-                                sourceComponent: StructureView { }
+                                sourceComponent: StructureView {
+                                    HelpTipNotification {
+                                        tipName: "structure"
+                                        enabled: structureViewLoader.visible
+                                    }
+                                }
 
                                 DisabledFeatureNotice {
                                     anchors.fill: parent
@@ -2298,7 +2360,7 @@ Item {
                 SplitView.maximumHeight: SplitView.preferredHeight
                 active: height >= 50
                 sourceComponent: Rectangle {
-                    color: FocusTracker.hasFocus ? accentColors.c300.background : accentColors.c200.background
+                    color: FocusTracker.hasFocus ? accentColors.c100.background : accentColors.c50.background
                     FocusTracker.window: Scrite.window
 
                     Behavior on color {
@@ -2447,6 +2509,8 @@ Item {
         nameFilters: modes[mode].nameFilters
         selectFolder: false
         selectMultiple: false
+        objectName: "Main File Dialog"
+        dirUpAction.shortcut: "Ctrl+Shift+U" // The default Ctrl+U interfers with underline
         onFolderChanged: {
             if(mode === "OPEN")
                 workspaceSettings.lastOpenFolderUrl = folder
@@ -2746,7 +2810,28 @@ Item {
         id: appBusyOverlay
         anchors.fill: parent
         busyMessage: "Computing Page Layout, Evaluating Page Count & Time ..."
-        visible: refCount > 0
-        property int refCount: 0
+        visible: RefCounter.isReffed
+        function ref() { RefCounter.ref() }
+        function deref() { RefCounter.deref() }
+    }
+
+    HelpTipNotification {
+        id: htNotification
+        enabled: tipName !== ""
+
+        Component.onCompleted: {
+            Qt.callLater( () => {
+                             if(helpNotificationSettings.dayZero === "")
+                                helpNotificationSettings.dayZero = new Date()
+
+                             const days = helpNotificationSettings.daysSinceZero()
+                             if(days >= 2) {
+                                 if(!helpNotificationSettings.isTipShown("discord"))
+                                     htNotification.tipName = "discord"
+                                 else if(!helpNotificationSettings.isTipShown("subscription") && days >= 5)
+                                     htNotification.tipName = "subscription"
+                             }
+                         })
+        }
     }
 }

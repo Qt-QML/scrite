@@ -1,7 +1,7 @@
 /****************************************************************************
 **
-** Copyright (C) TERIFLIX Entertainment Spaces Pvt. Ltd. Bengaluru
-** Author: Prashanth N Udupa (prashanth.udupa@teriflix.com)
+** Copyright (C) VCreate Logic Pvt. Ltd. Bengaluru
+** Author: Prashanth N Udupa (prashanth@scrite.io)
 **
 ** This code is distributed under GPL v3. Complete text of the license
 ** can be found here: https://www.gnu.org/licenses/gpl-3.0.txt
@@ -24,7 +24,7 @@ class FileInfo : public QObject
     QML_ELEMENT
 
 public:
-    FileInfo(QObject *parent = nullptr);
+    explicit FileInfo(QObject *parent = nullptr);
     ~FileInfo();
 
     Q_PROPERTY(QString absoluteFilePath READ absoluteFilePath WRITE setAbsoluteFilePath NOTIFY fileInfoChanged)
@@ -60,7 +60,7 @@ private:
 class FileIconProvider : public QQuickImageProvider
 {
 public:
-    FileIconProvider();
+    explicit FileIconProvider();
     ~FileIconProvider();
 
     // QQuickImageProvider interface

@@ -1,7 +1,7 @@
 /****************************************************************************
 **
-** Copyright (C) TERIFLIX Entertainment Spaces Pvt. Ltd. Bengaluru
-** Author: Prashanth N Udupa (prashanth.udupa@teriflix.com)
+** Copyright (C) VCreate Logic Pvt. Ltd. Bengaluru
+** Author: Prashanth N Udupa (prashanth@scrite.io)
 **
 ** This code is distributed under GPL v3. Complete text of the license
 ** can be found here: https://www.gnu.org/licenses/gpl-3.0.txt
@@ -33,15 +33,23 @@ Item {
     Component.onCompleted: {
         modalDialog.closeOnEscape = false
 
-        var reportName = typeof modalDialog.arguments === "string" ? modalDialog.arguments : modalDialog.arguments.reportName
-        generator = Scrite.document.createReportGenerator(reportName)
-        if(generator === null) {
-            modalDialog.closeable = true
-            notice.text = "Report generator for '" + JSON.stringify(modalDialog.arguments) + "' could not be created."
-        } else if(typeof modalDialog.arguments !== "string") {
-            var config = modalDialog.arguments.configuration
-            for(var member in config)
-                generator.setConfigurationValue(member, config[member])
+        if(Scrite.app.verifyType(modalDialog.arguments, "AbstractReportGenerator")) {
+            generator = modalDialog.arguments
+            if(generator === null) {
+                modalDialog.closeable = true
+                notice.text = "Invalid report generator was supplied."
+            }
+        } else {
+            var reportName = typeof modalDialog.arguments === "string" ? modalDialog.arguments : modalDialog.arguments.reportName
+            generator = Scrite.document.createReportGenerator(reportName)
+            if(generator === null) {
+                modalDialog.closeable = true
+                notice.text = "Report generator for '" + JSON.stringify(modalDialog.arguments) + "' could not be created."
+            } else if(typeof modalDialog.arguments !== "string") {
+                var config = modalDialog.arguments.configuration
+                for(var member in config)
+                    generator.setConfigurationValue(member, config[member])
+            }
         }
 
         if(generator !== null)
@@ -229,12 +237,18 @@ Item {
                                 implicitWidth: contentPanel.width
                                 implicitHeight: contentPanel.height
 
-                                ScrollView {
+                                Flickable {
                                     id: subsequenTabScrollView
                                     anchors.fill: parent
                                     anchors.leftMargin: 20
+                                    contentWidth: subsequenTabScrollViewContent.width
+                                    contentHeight: subsequenTabScrollViewContent.height
+                                    ScrollBar.vertical: ScrollBar2 {
+                                        flickable: subsequenTabScrollView
+                                    }
 
                                     Column {
+                                        id: subsequenTabScrollViewContent
                                         spacing: 5
                                         width: subsequenTabScrollView.width
 

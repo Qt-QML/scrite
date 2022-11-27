@@ -1,7 +1,7 @@
 /****************************************************************************
 **
-** Copyright (C) TERIFLIX Entertainment Spaces Pvt. Ltd. Bengaluru
-** Author: Prashanth N Udupa (prashanth.udupa@teriflix.com)
+** Copyright (C) VCreate Logic Pvt. Ltd. Bengaluru
+** Author: Prashanth N Udupa (prashanth@scrite.io)
 **
 ** This code is distributed under GPL v3. Complete text of the license
 ** can be found here: https://www.gnu.org/licenses/gpl-3.0.txt
@@ -39,7 +39,7 @@
 class QMarginsFHelper : public QObjectSerializer::Helper
 {
 public:
-    QMarginsFHelper();
+    explicit QMarginsFHelper();
     ~QMarginsFHelper() override;
 
     bool canHandle(int type) const override;
@@ -54,7 +54,7 @@ private:
 class QListHelper : public QObjectSerializer::Helper
 {
 public:
-    QListHelper();
+    explicit QListHelper();
     ~QListHelper() override;
 
     bool canHandle(int type) const override;
@@ -71,7 +71,7 @@ private:
 class QRealHelper : public QObjectSerializer::Helper
 {
 public:
-    QRealHelper();
+    explicit QRealHelper();
     ~QRealHelper() override;
 
     bool canHandle(int type) const override;
@@ -82,7 +82,7 @@ public:
 class QFontHelper : public QObjectSerializer::Helper
 {
 public:
-    QFontHelper();
+    explicit QFontHelper();
     ~QFontHelper() override;
 
     bool canHandle(int type) const override;
@@ -93,7 +93,7 @@ public:
 class QRectFHelper : public QObjectSerializer::Helper
 {
 public:
-    QRectFHelper();
+    explicit QRectFHelper();
     ~QRectFHelper() override;
 
     bool canHandle(int type) const override;
@@ -104,7 +104,7 @@ public:
 class ObjectSerializerHelperRegistry : public QList<QObjectSerializer::Helper *>
 {
 public:
-    ObjectSerializerHelperRegistry();
+    explicit ObjectSerializerHelperRegistry();
     ~ObjectSerializerHelperRegistry();
 
     const QObjectSerializer::Helper *findHelper(int type) const;
@@ -544,13 +544,13 @@ QString QObjectSerializer::toJsonString(const QObject *object)
 {
     const QJsonObject json = QObjectSerializer::toJson(object);
     const QJsonDocument doc(json);
-    return QString::fromLatin1(doc.toJson());
+    return doc.toJson();
 }
 
 bool QObjectSerializer::fromJsonString(const QString &json, QObject *object,
                                        QObjectFactory *factory)
 {
-    const QJsonDocument doc = QJsonDocument::fromJson(json.toLatin1());
+    const QJsonDocument doc = QJsonDocument::fromJson(json.toUtf8());
     const QJsonObject jsonObject = doc.object();
     return QObjectSerializer::fromJson(jsonObject, object, factory);
 }

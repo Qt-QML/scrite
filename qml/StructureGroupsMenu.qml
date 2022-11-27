@@ -1,7 +1,7 @@
 /****************************************************************************
 **
-** Copyright (C) TERIFLIX Entertainment Spaces Pvt. Ltd. Bengaluru
-** Author: Prashanth N Udupa (prashanth.udupa@teriflix.com)
+** Copyright (C) VCreate Logic Pvt. Ltd. Bengaluru
+** Author: Prashanth N Udupa (prashanth@scrite.io)
 **
 ** This code is distributed under GPL v3. Complete text of the license
 ** can be found here: https://www.gnu.org/licenses/gpl-3.0.txt
@@ -21,12 +21,20 @@ Menu2 {
 
     property SceneGroup sceneGroup: null
     signal toggled(int row, string name)
+    closePolicy: htn.Notification.active ? Popup.NoAutoClose : Popup.CloseOnEscape|Popup.CloseOnPressOutside
+    enabled: !Scrite.document.readOnly
 
     title: "Tag Groups"
     property string innerTitle: ""
 
     width: 450
     height: 500
+
+    HelpTipNotification {
+        id: htn
+        tipName: "story_beat_tagging"
+        enabled: structureGroupsMenu.opened
+    }
 
     MenuItem2 {
         width: structureGroupsMenu.width

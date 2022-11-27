@@ -1,7 +1,7 @@
 /****************************************************************************
 **
-** Copyright (C) TERIFLIX Entertainment Spaces Pvt. Ltd. Bengaluru
-** Author: Prashanth N Udupa (prashanth.udupa@teriflix.com)
+** Copyright (C) VCreate Logic Pvt. Ltd. Bengaluru
+** Author: Prashanth N Udupa (prashanth@scrite.io)
 **
 ** This code is distributed under GPL v3. Complete text of the license
 ** can be found here: https://www.gnu.org/licenses/gpl-3.0.txt
@@ -30,7 +30,7 @@ private:
 #define SAVE_PAINTER_STATE SavePainterState painterStateSaver(painter);
 
 CharacterRelationshipsGraphScene::CharacterRelationshipsGraphScene(
-        const CharacterRelationshipsGraph *graph, QObject *parent)
+        const CharacterRelationshipGraph *graph, QObject *parent)
     : PdfExportableGraphicsScene(parent)
 {
     const QString title = [graph]() {
@@ -62,18 +62,16 @@ CharacterRelationshipsGraphScene::CharacterRelationshipsGraphScene(
     nodesAndEdges->setPen(Qt::NoPen);
     this->addItem(nodesAndEdges);
 
-    const ObjectListPropertyModel<CharacterRelationshipsGraphNode *> *nodes =
-            dynamic_cast<ObjectListPropertyModel<CharacterRelationshipsGraphNode *> *>(
-                    graph->nodes());
-    const ObjectListPropertyModel<CharacterRelationshipsGraphEdge *> *edges =
-            dynamic_cast<ObjectListPropertyModel<CharacterRelationshipsGraphEdge *> *>(
-                    graph->edges());
+    const QObjectListModel<CharacterRelationshipGraphNode *> *nodes =
+            dynamic_cast<QObjectListModel<CharacterRelationshipGraphNode *> *>(graph->nodes());
+    const QObjectListModel<CharacterRelationshipGraphEdge *> *edges =
+            dynamic_cast<QObjectListModel<CharacterRelationshipGraphEdge *> *>(graph->edges());
 
     const int nrNodes = nodes->rowCount(QModelIndex());
     const int nrEdges = edges->rowCount(QModelIndex());
 
     for (int i = 0; i < nrNodes; i++) {
-        const CharacterRelationshipsGraphNode *node = nodes->at(i);
+        const CharacterRelationshipGraphNode *node = nodes->at(i);
         CharacterRelationshipsGraphNodeItem *nodeItem =
                 new CharacterRelationshipsGraphNodeItem(node);
         nodeItem->setZValue(1);
@@ -81,7 +79,7 @@ CharacterRelationshipsGraphScene::CharacterRelationshipsGraphScene(
     }
 
     for (int i = 0; i < nrEdges; i++) {
-        const CharacterRelationshipsGraphEdge *edge = edges->at(i);
+        const CharacterRelationshipGraphEdge *edge = edges->at(i);
         CharacterRelationshipsGraphEdgeItem *edgeItem =
                 new CharacterRelationshipsGraphEdgeItem(edge);
         edgeItem->setZValue(2);
@@ -92,7 +90,7 @@ CharacterRelationshipsGraphScene::CharacterRelationshipsGraphScene(
         const QRectF rect = nodesAndEdges->childrenBoundingRect();
         if (nodes->isEmpty())
             return rect;
-        const CharacterRelationshipsGraphNode *node = nodes->at(0);
+        const CharacterRelationshipGraphNode *node = nodes->at(0);
         const qreal margin = qMax(node->rect().width(), node->rect().height()) * 0.075;
         return rect.adjusted(-margin, -margin, margin, margin);
     }();
@@ -112,7 +110,7 @@ CharacterRelationshipsGraphScene::~CharacterRelationshipsGraphScene() { }
 ///////////////////////////////////////////////////////////////////////////////
 
 CharacterRelationshipsGraphNodeItem::CharacterRelationshipsGraphNodeItem(
-        const CharacterRelationshipsGraphNode *node)
+        const CharacterRelationshipGraphNode *node)
     : QGraphicsRectItem(nullptr), m_node(node)
 {
     this->setRect(node->rect());
@@ -176,10 +174,21 @@ void CharacterRelationshipsGraphNodeItem::paint(QPainter *painter, const QStyleO
         painter->setOpacity(1.0);
     }
 
-    QImage image(hasPhotos ? photos.first() : QStringLiteral(":/icons/content/character_icon.png"));
+    QImage image(hasPhotos ? character->keyPhoto()
+                           : QStringLiteral(":/icons/content/character_icon.png"));
     image = image.scaled(rect.size().toSize(), Qt::KeepAspectRatioByExpanding,
                          Qt::SmoothTransformation);
-    painter->drawImage(rect, image);
+
+    auto imageSourceRect = [=]() -> QRectF {
+        QSizeF imageSize = image.size();
+        imageSize.scale(rect.size(), Qt::IgnoreAspectRatio);
+
+        QRectF imageRect(QPointF(0, 0), imageSize);
+        imageRect.moveCenter(image.rect().center());
+        return imageRect;
+    };
+
+    painter->drawImage(rect, image, imageSourceRect());
 
     painter->setBrush(Qt::NoBrush);
     painter->setPen(Qt::lightGray);
@@ -223,7 +232,7 @@ void CharacterRelationshipsGraphNodeItem::paint(QPainter *painter, const QStyleO
 ///////////////////////////////////////////////////////////////////////////////
 
 CharacterRelationshipsGraphEdgeItem::CharacterRelationshipsGraphEdgeItem(
-        const CharacterRelationshipsGraphEdge *edge)
+        const CharacterRelationshipGraphEdge *edge)
     : QGraphicsPathItem(nullptr)
 {
     const QPainterPath path = Application::stringToPainterPath(edge->pathString());

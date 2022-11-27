@@ -1,7 +1,7 @@
 /****************************************************************************
 **
-** Copyright (C) TERIFLIX Entertainment Spaces Pvt. Ltd. Bengaluru
-** Author: Prashanth N Udupa (prashanth.udupa@teriflix.com)
+** Copyright (C) VCreate Logic Pvt. Ltd. Bengaluru
+** Author: Prashanth N Udupa (prashanth@scrite.io)
 **
 ** This code is distributed under GPL v3. Complete text of the license
 ** can be found here: https://www.gnu.org/licenses/gpl-3.0.txt
@@ -11,24 +11,22 @@
 **
 ****************************************************************************/
 
-#include "objectlistpropertymodel.h"
+#include "qobjectlistmodel.h"
 
 #include <QJSEngine>
 
-ObjectListPropertyModelBase::ObjectListPropertyModelBase(QObject *parent)
-    : QAbstractListModel(parent)
+AbstractQObjectListModel::AbstractQObjectListModel(QObject *parent) : QAbstractListModel(parent)
 {
     connect(this, &QAbstractListModel::rowsInserted, this,
-            &ObjectListPropertyModelBase::objectCountChanged);
+            &AbstractQObjectListModel::objectCountChanged);
     connect(this, &QAbstractListModel::rowsRemoved, this,
-            &ObjectListPropertyModelBase::objectCountChanged);
+            &AbstractQObjectListModel::objectCountChanged);
     connect(this, &QAbstractListModel::modelReset, this,
-            &ObjectListPropertyModelBase::objectCountChanged);
-    connect(this, &QAbstractListModel::dataChanged, this,
-            &ObjectListPropertyModelBase::dataChanged2);
+            &AbstractQObjectListModel::objectCountChanged);
+    connect(this, &QAbstractListModel::dataChanged, this, &AbstractQObjectListModel::dataChanged2);
 }
 
-QHash<int, QByteArray> ObjectListPropertyModelBase::roleNames() const
+QHash<int, QByteArray> AbstractQObjectListModel::roleNames() const
 {
     return { { ObjectItemRole, QByteArrayLiteral("objectItem") },
              { ModelDataRole, QByteArrayLiteral("modelData") } };
@@ -119,8 +117,8 @@ void SortFilterObjectListModel::setFilterFunction(const QJSValue &val)
 
 QHash<int, QByteArray> SortFilterObjectListModel::roleNames() const
 {
-    return { { ObjectListPropertyModelBase::ObjectItemRole, QByteArrayLiteral("objectItem") },
-             { ObjectListPropertyModelBase::ModelDataRole, QByteArrayLiteral("modelData") } };
+    return { { AbstractQObjectListModel::ObjectItemRole, QByteArrayLiteral("objectItem") },
+             { AbstractQObjectListModel::ModelDataRole, QByteArrayLiteral("modelData") } };
 }
 
 bool SortFilterObjectListModel::lessThan(const QModelIndex &source_left,
@@ -130,13 +128,13 @@ bool SortFilterObjectListModel::lessThan(const QModelIndex &source_left,
         return false;
 
     const QMetaObject *mo = this->sourceModel()->metaObject();
-    if (!mo->inherits(&ObjectListPropertyModelBase::staticMetaObject))
+    if (!mo->inherits(&AbstractQObjectListModel::staticMetaObject))
         return false;
 
     QObject *left_object =
-            source_left.data(ObjectListPropertyModelBase::ObjectItemRole).value<QObject *>();
+            source_left.data(AbstractQObjectListModel::ObjectItemRole).value<QObject *>();
     QObject *right_object =
-            source_right.data(ObjectListPropertyModelBase::ObjectItemRole).value<QObject *>();
+            source_right.data(AbstractQObjectListModel::ObjectItemRole).value<QObject *>();
     if (left_object == nullptr || right_object == nullptr)
         return false;
 
@@ -161,7 +159,7 @@ bool SortFilterObjectListModel::filterAcceptsRow(int source_row,
         return true;
 
     const QMetaObject *mo = this->sourceModel()->metaObject();
-    if (!mo->inherits(&ObjectListPropertyModelBase::staticMetaObject))
+    if (!mo->inherits(&AbstractQObjectListModel::staticMetaObject))
         return true;
 
     const QModelIndex source_index = this->sourceModel()->index(source_row, 0, source_parent);
@@ -169,7 +167,7 @@ bool SortFilterObjectListModel::filterAcceptsRow(int source_row,
         return true;
 
     QObject *source_object =
-            source_index.data(ObjectListPropertyModelBase::ObjectItemRole).value<QObject *>();
+            source_index.data(AbstractQObjectListModel::ObjectItemRole).value<QObject *>();
     if (source_object == nullptr)
         return true;
 

@@ -1,7 +1,7 @@
 /****************************************************************************
 **
-** Copyright (C) TERIFLIX Entertainment Spaces Pvt. Ltd. Bengaluru
-** Author: Prashanth N Udupa (prashanth.udupa@teriflix.com)
+** Copyright (C) VCreate Logic Pvt. Ltd. Bengaluru
+** Author: Prashanth N Udupa (prashanth@scrite.io)
 **
 ** This code is distributed under GPL v3. Complete text of the license
 ** can be found here: https://www.gnu.org/licenses/gpl-3.0.txt
@@ -531,6 +531,17 @@ Item {
         animatePanAndZoom: false
         property bool updateScriteDocumentUserDataEnabled: false
 
+        function enablePanAndZoomAnimation(delay) {
+            if(animatePanAndZoom === true)
+                return
+            if(delay === undefined || delay === null)
+                animatePanAndZoom = true;
+            else
+                Scrite.app.execLater(canvasScroll, delay, () => {
+                                        canvasScroll.animatePanAndZoom = true
+                                     })
+        }
+
         function updateScriteDocumentUserData() {
             if(!updateScriteDocumentUserDataEnabled || Scrite.document.readOnly || animatingPanOrZoom)
                 return
@@ -563,7 +574,7 @@ Item {
                     Scrite.app.execLater(canvasScroll, 500, function() {
                         var area = canvasItemsBoundingBox.boundingBox
                         canvasScroll.zoomFit(area)
-                        canvasScroll.animatePanAndZoom = true
+                        canvasScroll.enablePanAndZoomAnimation(2000)
                     })
                 }
             } else {
@@ -577,8 +588,7 @@ Item {
                         canvasScroll.ensureItemVisible(item, canvas.scale)
                 } else
                     canvasScroll.zoomOneMiddleArea()
-
-                Qt.callLater( function() { canvasScroll.animatePanAndZoom = true } )
+                canvasScroll.enablePanAndZoomAnimation(2000)
             }
 
             if(Scrite.document.structure.forceBeatBoardLayout)
@@ -1165,7 +1175,7 @@ Item {
                     y: modelData.geometry.y - 120 - topMarginForStacks
                     width: modelData.geometry.width + 80
                     height: modelData.geometry.height + 120 + topMarginForStacks + 40
-                    color: Scrite.app.translucent(accentColors.windowColor, Scrite.document.structure.forceBeatBoardLayout ? 0.3 : 0.1)
+                    color: Scrite.app.translucent(accentColors.c100.background, Scrite.document.structure.forceBeatBoardLayout ? 0.3 : 0.1)
                     border.width: 2
                     border.color: accentColors.c600.background
                     enabled: !createItemMouseHandler.enabled && !currentElementItemShadow.visible && !annotationGripLoader.active
@@ -1185,7 +1195,7 @@ Item {
                         anchors.top: parent.top
                         anchors.bottom: episodeNameText.bottom
                         anchors.bottomMargin: -8
-                        color: accentColors.c600.background
+                        color: accentColors.c200.background
                     }
 
                     Text {
@@ -1195,7 +1205,7 @@ Item {
                         anchors.margins: 8
                         font.pointSize: Scrite.app.idealFontPointSize + 8
                         font.bold: true
-                        color: accentColors.c600.text
+                        color: accentColors.c200.text
                         text: "<b>" + modelData.name + "</b><font size=\"-2\">: " + modelData.sceneCount + (modelData.sceneCount === 1 ? " Scene": " Scenes") + "</font>"
                     }
                 }
@@ -1212,7 +1222,7 @@ Item {
                     width: modelData.geometry.width + 40
                     height: modelData.geometry.height + 40 + topMarginForStacks
                     radius: 0
-                    color: Scrite.app.translucent(accentColors.windowColor, Scrite.document.structure.forceBeatBoardLayout ? 0.3 : 0.1)
+                    color: Scrite.app.translucent(accentColors.c100.background, Scrite.document.structure.forceBeatBoardLayout ? 0.3 : 0.1)
                     border.width: 1
                     border.color: accentColors.borderColor
                     enabled: !createItemMouseHandler.enabled && !annotationGripLoader.active
@@ -1297,7 +1307,7 @@ Item {
                         anchors.margins: -parent.radius
                         border.width: parent.border.width
                         border.color: parent.border.color
-                        color: Scrite.app.translucent(accentColors.windowColor, 0.4)
+                        color: Scrite.app.translucent(accentColors.c200.background, 0.4)
 
                         MouseArea {
                             id: canvasBeatLabelMouseArea
@@ -1332,7 +1342,7 @@ Item {
                         anchors.leftMargin: parent.radius*2
                         anchors.bottomMargin: parent.radius-parent.border.width
                         padding: 10
-                        color: "black"
+                        color: accentColors.c200.text
                     }
                 }
             }
@@ -2039,13 +2049,39 @@ Item {
         }
     }
 
-    AttachmentsDropArea2 {
+    AttachmentsDropArea {
+        id: annotationAttachmentDropArea
+        z: -10
         allowedType: Attachments.PhotosOnly
         anchors.fill: canvasScroll
-        attachmentNoticeSuffix: "Drop this photo here as an annotation."
         onDropped: {
             var pos = canvas.mapFromItem(canvasScroll, mouse.x, mouse.y)
             createNewImageAnnotation(pos.x, pos.y, attachment.filePath)
+        }
+    }
+
+    Rectangle {
+        id: annotationAttachmentNotice
+        anchors.fill: parent
+        visible: annotationAttachmentDropArea.active
+        color: Scrite.app.translucent(primaryColors.c500.background, 0.5)
+
+        Rectangle {
+            anchors.fill: attachmentNotice
+            anchors.margins: -30
+            radius: 4
+            color: primaryColors.c700.background
+        }
+
+        Text {
+            id: attachmentNotice
+            anchors.centerIn: parent
+            width: parent.width * noticeWidthFactor
+            wrapMode: Text.WordWrap
+            color: primaryColors.c700.text
+            text: parent.visible ? "<b>" + annotationAttachmentDropArea.attachment.originalFileName + "</b><br/><br/>" + "Drop this photo here as an annotation." : ""
+            horizontalAlignment: Text.AlignHCenter
+            font.pointSize: Scrite.app.idealFontPointSize
         }
     }
 
@@ -2094,6 +2130,63 @@ Item {
             spacing: 10
             anchors.verticalCenter: parent.verticalCenter
             anchors.right: parent.right
+
+            ToolButton3 {
+                iconSource: "../icons/content/view_options.png"
+                autoRepeat: false
+                ToolTip.text: "Toggle between index-card view options."
+                checkable: false
+                suggestedWidth: parent.height
+                suggestedHeight: parent.height
+                onClicked: structureViewOptionsMenu.show()
+                down: structureViewOptionsMenu.active
+
+                MenuLoader {
+                    id: structureViewOptionsMenu
+                    anchors.left: parent.left
+                    anchors.bottom: parent.top
+                    anchors.bottomMargin: item ? item.height : 0
+                    menu: Menu2 {
+                        Menu2 {
+                            title: "Card UI Mode"
+
+                            MenuItem2 {
+                                text: "Index Card UI"
+                                checkable: true
+                                checked: Scrite.document.structure.canvasUIMode === Structure.IndexCardUI
+                                onToggled: if(checked) contentLoader.reset( contentLoader.toggleCanvasUI )
+                            }
+
+                            MenuItem2 {
+                                text: "Synopsis Card UI"
+                                enabled: Scrite.document.structure.elementStacks.objectCount === 0
+                                checkable: true
+                                checked: Scrite.document.structure.canvasUIMode === Structure.SynopsisEditorUI
+                                onToggled: if(checked) contentLoader.reset( contentLoader.toggleCanvasUI )
+                            }
+                        }
+
+                        Menu2 {
+                            title: "Index Card Content"
+                            enabled: Scrite.document.structure.canvasUIMode === Structure.IndexCardUI
+
+                            MenuItem2 {
+                                text: "Synopsis"
+                                checkable: true
+                                checked: Scrite.document.structure.indexCardContent === Structure.Synopsis
+                                onToggled: if(checked) Scrite.document.structure.indexCardContent = Structure.Synopsis
+                            }
+
+                            MenuItem2 {
+                                text: "Featured Photo"
+                                checkable: true
+                                checked: Scrite.document.structure.indexCardContent === Structure.FeaturedPhoto
+                                onToggled: if(checked) Scrite.document.structure.indexCardContent = Structure.FeaturedPhoto
+                            }
+                        }
+                    }
+                }
+            }
 
             ToolButton3 {
                 iconSource: "../icons/hardware/mouse.png"
@@ -2375,6 +2468,7 @@ Item {
                 opacity: 0.5
                 showTooltip: false
                 sceneType: elementItem.element.scene.type
+                lightBackground: Scrite.app.isLightColor(background.color)
             }
 
             Image {
@@ -2531,16 +2625,8 @@ Item {
                 color: Qt.tint(element.scene.color, selected ? "#C0FFFFFF" : "#F0FFFFFF")
                 border.width: elementItem.selected ? 2 : 1
 
-                property color borderColor: Scrite.app.isLightColor(element.scene.color) ? "gray" : element.scene.color
+                property color borderColor: Scrite.app.isLightColor(element.scene.color) ? Qt.rgba(0.75,0.75,0.75,1.0) : element.scene.color
                 border.color: elementItem.selected ? borderColor : Qt.lighter(borderColor)
-
-                Rectangle {
-                    y: parent.border.width
-                    color: parent.border.color
-                    width: parent.width-2*parent.border.width
-                    height: 2*parent.border.width
-                    anchors.horizontalCenter: parent.horizontalCenter
-                }
 
                 // Move index-card around
                 MouseArea {
@@ -2614,7 +2700,10 @@ Item {
                             return elementIndex * 2 + 0
                         return (indexes[0] + Scrite.document.structure.elementCount) * 2 + 0
                     }
-                    TabSequenceItem.onAboutToReceiveFocus: Scrite.document.structure.currentElementIndex = elementIndex
+                    TabSequenceItem.onAboutToReceiveFocus: {
+                        Scrite.document.structure.currentElementIndex = elementIndex
+                        Qt.callLater(maybeAssumeFocus)
+                    }
 
                     property bool hasFocus: false
 
@@ -2661,6 +2750,7 @@ Item {
                                 elementItem.select()
                             headingFieldLoader.hasFocus = activeFocus
                         }
+                        Component.onCompleted: headingFieldLoader.hasFocus = activeFocus
                         Keys.onEscapePressed: canvasTabSequence.releaseFocus()
                         enableTransliteration: true
                         property var currentLanguage: Scrite.app.transliterationEngine.language
@@ -2687,6 +2777,8 @@ Item {
                     id: synopsisFieldLoader
                     width: parent.width
                     lod: elementItem.selected && !canvas.scaleIsLessForEdit ? eHIGH : eLOW
+                    sanctioned: Scrite.document.structure.indexCardContent === Structure.Synopsis
+                    visible: sanctioned
 
                     TabSequenceItem.enabled: elementItem.stackedOnTop
                     TabSequenceItem.manager: canvasTabSequence
@@ -2696,7 +2788,10 @@ Item {
                             return elementIndex * 2 + 1
                         return (indexes[0] + Scrite.document.structure.elementCount) * 2 + 1
                     }
-                    TabSequenceItem.onAboutToReceiveFocus: Scrite.document.structure.currentElementIndex = elementIndex
+                    TabSequenceItem.onAboutToReceiveFocus: {
+                        Scrite.document.structure.currentElementIndex = elementIndex
+                        Qt.callLater(maybeAssumeFocus)
+                    }
 
                     property real idealHeight: Math.max(minIndexCardHeight-headingFieldLoader.height-footerRow.height-2*parent.spacing, 200)
 
@@ -2723,6 +2818,7 @@ Item {
                             selectByMouse: false
                             Transliterator.textDocument: textDocument
                             Transliterator.applyLanguageFonts: screenplayEditorSettings.applyUserDefinedLanguageFonts
+                            Transliterator.spellCheckEnabled: true
                             font.pointSize: Scrite.app.idealFontPointSize
                             color: element.scene.hasTitle ? "black" : "gray"
                             // maximumLineCount: Math.max(1, (parent.height / idealAppFontMetrics.lineSpacing)-1)
@@ -2732,13 +2828,15 @@ Item {
                                                       result.filter = true
                                                       result.accepted = false
                                                   }
+
+                            SpellingSuggestionsMenu2 { }
                         }
 
                         Component.onCompleted: synopsisFieldLoader.hasFocus = false
                     }
 
                     highDetailComponent: Item {
-                        width: parent.width
+                        width: synopsisFieldLoader.width
                         height: synopsisFieldLoader.idealHeight
 
                         function assumeFocus() {
@@ -2769,6 +2867,7 @@ Item {
                                 Transliterator.cursorPosition: cursorPosition
                                 Transliterator.hasActiveFocus: activeFocus
                                 Transliterator.applyLanguageFonts: screenplayEditorSettings.applyUserDefinedLanguageFonts
+                                Transliterator.spellCheckEnabled: true
                                 placeholderText: "Describe what happens in this scene."
                                 font.pointSize: Scrite.app.idealFontPointSize
                                 wrapMode: Text.WrapAtWordBoundaryOrAnywhere
@@ -2784,6 +2883,7 @@ Item {
                                     synopsisFieldLoader.hasFocus = activeFocus
                                 }
                                 Keys.onEscapePressed: canvasTabSequence.releaseFocus()
+                                Component.onCompleted: synopsisFieldLoader.hasFocus = activeFocus
                                 SpecialSymbolsSupport {
                                     anchors.top: parent.bottom
                                     anchors.left: parent.left
@@ -2791,6 +2891,7 @@ Item {
                                     textEditorHasCursorInterface: true
                                     enabled: !Scrite.document.readOnly
                                 }
+                                SpellingSuggestionsMenu2 { }
                                 onCursorRectangleChanged: {
                                     var y1 = cursorRectangle.y
                                     var y2 = cursorRectangle.y + cursorRectangle.height
@@ -2853,21 +2954,92 @@ Item {
                     }
                 }
 
+                LodLoader {
+                    id: featuredImageFieldLoader
+                    width: parent.width
+                    height: synopsisFieldLoader.idealHeight
+                    lod: synopsisFieldLoader.lod
+                    sanctioned: Scrite.document.structure.indexCardContent === Structure.FeaturedPhoto
+                    visible: sanctioned
+                    resetWidthBeforeLodChange: false
+                    resetHeightBeforeLodChange: false
+                    lowDetailComponent: Image {
+                        id: lowLodfeaturedImageField
+                        property Attachments sceneAttachments: element.scene.attachments
+                        property Attachment featuredAttachment: sceneAttachments.featuredAttachment
+                        property Attachment featuredImage: featuredAttachment && featuredAttachment.type === Attachment.Photo ? featuredAttachment : null
+                        property string fillModeAttrib: "indexCardFillMode"
+                        property int defaultFillMode: Image.PreserveAspectCrop
+
+                        fillMode: {
+                            if(!featuredImage)
+                                return defaultFillMode
+                            const ud = featuredImage.userData
+                            if(ud[fillModeAttrib])
+                                return ud[fillModeAttrib] === "fit" ? Image.PreserveAspectFit : Image.PreserveAspectCrop
+                            return defaultFillMode
+                        }
+                        source: featuredImage ? featuredImage.fileSource : ""
+                        mipmap: !(canvasScroll.moving || canvasScroll.flicking)
+
+                        Loader {
+                            anchors.fill: parent
+                            active: !parent.featuredAttachment
+                            sourceComponent: AttachmentsDropArea2 {
+                                allowedType: Attachments.PhotosOnly
+                                target: lowLodfeaturedImageField.sceneAttachments
+                                onDropped: {
+                                    attachment.featured = true
+                                    allowDrop()
+                                }
+                                attachmentNoticeSuffix: "Drop this photo to tag it as featured image for this scene."
+
+                                Text {
+                                    width: parent.width
+                                    horizontalAlignment: Text.AlignHCenter
+                                    anchors.centerIn: parent
+                                    wrapMode: Text.WordWrap
+                                    font.pointSize: Scrite.app.idealFontPointSize
+                                    text: "Drag & Drop a Photo"
+                                    visible: !parent.active
+                                }
+                            }
+                        }
+                    }
+
+                    highDetailComponent: SceneFeaturedImage {
+                        scene: element.scene
+                        fillModeAttrib: "indexCardFillMode"
+                        defaultFillMode: Image.PreserveAspectCrop
+                        mipmap: !(canvasScroll.moving || canvasScroll.flicking)
+                    }
+                }
+
                 Item {
                     id: footerRow
                     width: parent.width
                     height: Math.max(Math.max(sceneTypeImage.height, dragHandle.height), footerLabels.height)
                     readonly property real spacing: 5
+                    property bool lightBackground: Scrite.app.isLightColor(footerBackgrund.color)
+
+                    Rectangle {
+                        id: footerBackgrund
+                        anchors.fill: parent
+                        anchors.margins: -5
+                        property color baseColor: background.border.color
+                        color: Qt.tint(baseColor, elementItem.selected ? "#70FFFFFF" : "#A0FFFFFF")
+                    }
 
                     SceneTypeImage {
                         id: sceneTypeImage
                         width: 24; height: 24
                         opacity: 0.5
                         showTooltip: false
-                        sceneType: element.scene.type
+                        sceneType: elementItem.element.scene.type
                         anchors.left: parent.left
                         anchors.bottom: parent.bottom
                         visible: sceneType !== Scene.Standard
+                        lightBackground: parent.lightBackground
                     }
 
                     Column {
@@ -2887,6 +3059,7 @@ Item {
                             visible: element.scene.groups.length > 0 || !element.scene.hasCharacters
                             wrapMode: Text.WrapAtWordBoundaryOrAnywhere
                             font.pointSize: Scrite.app.idealAppFontSize - 2
+                            color: footerRow.lightBackground ? "black" : "white"
                         }
 
                         Text {
@@ -2900,12 +3073,15 @@ Item {
                                     return "<b>Characters</b>: " + element.scene.characterNames.join(", ")
                                 return ""
                             }
+                            color: footerRow.lightBackground ? "black" : "white"
                         }
                     }
 
                     Image {
                         id: dragHandle
-                        source: elementItem.element.scene.addedToScreenplay || elementItem.Drag.active ? "../icons/action/view_array.png" : "../icons/content/add_circle_outline.png"
+                        source: elementItem.element.scene.addedToScreenplay || elementItem.Drag.active ?
+                               (parent.lightBackground ? "../icons/action/view_array.png" : "../icons/action/view_array_inverted.png") :
+                               (parent.lightBackground ? "../icons/content/add_circle_outline.png" : "../icons/content/add_circle_outline_inverted.png")
                         width: 24; height: 24
                         anchors.right: parent.right
                         anchors.bottom: parent.bottom
@@ -3116,7 +3292,7 @@ Item {
             fromElement: connectorFromElement
             toElement: connectorToElement
             arrowAndLabelSpacing: labelBg.width
-            outlineWidth: Scrite.app.devicePixelRatio*canvas.scale*structureCanvasSettings.connectorLineWidth
+            outlineWidth: Scrite.app.devicePixelRatio * canvas.scale * structureCanvasSettings.lineWidthOfConnectors
             visible: {
                 if(canBeVisible)
                     return intersects(canvasScroll.viewportRect)

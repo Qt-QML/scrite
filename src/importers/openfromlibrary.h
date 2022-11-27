@@ -1,7 +1,7 @@
 /****************************************************************************
 **
-** Copyright (C) TERIFLIX Entertainment Spaces Pvt. Ltd. Bengaluru
-** Author: Prashanth N Udupa (prashanth.udupa@teriflix.com)
+** Copyright (C) VCreate Logic Pvt. Ltd. Bengaluru
+** Author: Prashanth N Udupa (prashanth@scrite.io)
 **
 ** This code is distributed under GPL v3. Complete text of the license
 ** can be found here: https://www.gnu.org/licenses/gpl-3.0.txt
@@ -32,7 +32,7 @@ class LibraryService : public AbstractImporter
     QML_ELEMENT
 
 public:
-    LibraryService(QObject *parent = nullptr);
+    explicit LibraryService(QObject *parent = nullptr);
     ~LibraryService();
 
     // This this class cannot be used to import anything from a local file system
@@ -86,8 +86,9 @@ public:
 
     Q_INVOKABLE QJsonObject recordAt(int index) const;
 
-    Q_PROPERTY(QUrl baseUrl READ baseUrl CONSTANT)
+    Q_PROPERTY(QUrl baseUrl READ baseUrl NOTIFY baseUrlChanged)
     QUrl baseUrl() const { return m_baseUrl; }
+    Q_SIGNAL void baseUrlChanged();
 
     Q_PROPERTY(bool busy READ isBusy NOTIFY busyChanged)
     bool isBusy() const { return m_busy; }
@@ -106,7 +107,6 @@ private:
     Library(Type type, QObject *parent = nullptr);
 
     void fetchRecords();
-    void loadDatabase(const QByteArray &bytes);
     void setRecords(const QJsonArray &array);
     void setBusy(bool val);
 
@@ -114,7 +114,7 @@ private:
     Type m_type = Screenplays;
     bool m_busy = false;
     QJsonArray m_records;
-    const QUrl m_baseUrl = QUrl(QStringLiteral("http://www.teriflix.in/scrite/library/"));
+    QUrl m_baseUrl;
 };
 
 #endif

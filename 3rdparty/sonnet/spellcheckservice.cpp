@@ -1,7 +1,7 @@
 /****************************************************************************
 **
-** Copyright (C) TERIFLIX Entertainment Spaces Pvt. Ltd. Bengaluru
-** Author: Prashanth N Udupa (prashanth.udupa@teriflix.com)
+** Copyright (C) VCreate Logic Pvt. Ltd. Bengaluru
+** Author: Prashanth N Udupa (prashanth@scrite.io)
 **
 ** This code is distributed under GPL v3. Complete text of the license
 ** can be found here: https://www.gnu.org/licenses/gpl-3.0.txt
@@ -251,8 +251,12 @@ void SpellCheckService::setAsynchronous(bool val)
 
 void SpellCheckService::scheduleUpdate()
 {
-    if (this->findChild<QFutureWatcherBase *>(QString(), Qt::FindDirectChildrenOnly) != nullptr)
+    QFutureWatcherBase *watcher =
+            this->findChild<QFutureWatcherBase *>(QString(), Qt::FindDirectChildrenOnly);
+    if (watcher != nullptr) {
+        connect(watcher, &QFutureWatcherBase::destroyed, this, &SpellCheckService::scheduleUpdate);
         return;
+    }
 
     m_textModifiable.markAsModified();
     m_updateTimer.start(500, this);
@@ -265,16 +269,15 @@ void SpellCheckService::update()
     if (!m_textTracker.isModified())
         return;
 
+    emit started();
+
     this->setMisspelledFragments(QList<TextFragment>());
 
-    if (m_text.isEmpty())
-        return;
-
     QThreadPool *threadPool = SpellCheckServiceThreadPool();
-    if (threadPool == nullptr)
+    if (threadPool == nullptr || m_text.isEmpty()) {
+        emit finished();
         return;
-
-    emit started();
+    }
 
     SpellCheckServiceRequest request;
     request.text = m_text;

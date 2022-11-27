@@ -1,7 +1,7 @@
 /****************************************************************************
 **
-** Copyright (C) TERIFLIX Entertainment Spaces Pvt. Ltd. Bengaluru
-** Author: Prashanth N Udupa (prashanth.udupa@teriflix.com)
+** Copyright (C) VCreate Logic Pvt. Ltd. Bengaluru
+** Author: Prashanth N Udupa (prashanth@scrite.io)
 **
 ** This code is distributed under GPL v3. Complete text of the license
 ** can be found here: https://www.gnu.org/licenses/gpl-3.0.txt
@@ -280,12 +280,12 @@ Rectangle {
         category: "Structure Tab"
 
         property bool showGrid: true
-        property color gridColor: primaryColors.c400.background
+        property color gridColor: accentColors.c400.background
         property color canvasColor: accentColors.c50.background
         property bool showPreview: true
         property bool displayAnnotationProperties: true
         property bool showPullHandleAnimation: true
-        property real connectorLineWidth: 2
+        property real lineWidthOfConnectors: 1.5
     }
 
     Settings {
@@ -296,8 +296,10 @@ Rectangle {
         property string textMode: "HeadingOrTitle"
     }
 
-    QtObject {
+    Settings {
         id: instanceSettings
+        fileName: Scrite.app.settingsFilePath
+        category: "Screenplay Editor"
 
         property bool screenplayEditorAddButtonsAnimationShown: false
         property bool refreshButtonInStatsReportAnimationDone: false

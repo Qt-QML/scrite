@@ -1,7 +1,7 @@
 /****************************************************************************
 **
-** Copyright (C) TERIFLIX Entertainment Spaces Pvt. Ltd. Bengaluru
-** Author: Prashanth N Udupa (prashanth.udupa@teriflix.com)
+** Copyright (C) VCreate Logic Pvt. Ltd. Bengaluru
+** Author: Prashanth N Udupa (prashanth@scrite.io)
 **
 ** This code is distributed under GPL v3. Complete text of the license
 ** can be found here: https://www.gnu.org/licenses/gpl-3.0.txt
@@ -102,7 +102,7 @@ class SearchEngine : public QObject
     QML_ELEMENT
 
 public:
-    SearchEngine(QObject *parent = nullptr);
+    explicit SearchEngine(QObject *parent = nullptr);
     ~SearchEngine();
 
     Q_PROPERTY(QQmlListProperty<SearchAgent> searchAgents READ searchAgents NOTIFY searchAgentsChanged)
@@ -192,7 +192,7 @@ class TextDocumentSearch : public QObject
     QML_ELEMENT
 
 public:
-    TextDocumentSearch(QObject *parent = nullptr);
+    explicit TextDocumentSearch(QObject *parent = nullptr);
     ~TextDocumentSearch();
 
     Q_PROPERTY(QQuickTextDocument* textDocument READ textDocument WRITE setTextDocument NOTIFY textDocumentChanged RESET resetTextDocument)

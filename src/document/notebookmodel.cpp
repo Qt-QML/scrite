@@ -1,7 +1,7 @@
 /****************************************************************************
 **
-** Copyright (C) TERIFLIX Entertainment Spaces Pvt. Ltd. Bengaluru
-** Author: Prashanth N Udupa (prashanth.udupa@teriflix.com)
+** Copyright (C) VCreate Logic Pvt. Ltd. Bengaluru
+** Author: Prashanth N Udupa (prashanth@scrite.io)
 **
 ** This code is distributed under GPL v3. Complete text of the license
 ** can be found here: https://www.gnu.org/licenses/gpl-3.0.txt
@@ -32,7 +32,7 @@ static int nextItemId()
 class StandardItemWithId : public QStandardItem
 {
 public:
-    StandardItemWithId(int id = -1) : QStandardItem()
+    explicit StandardItemWithId(int id = -1) : QStandardItem()
     {
         this->setData(id >= 0 ? id : ::nextItemId(), NotebookModel::IdRole);
     }
@@ -42,7 +42,7 @@ public:
 class BookmarksItem : public StandardItemWithId
 {
 public:
-    BookmarksItem();
+    explicit BookmarksItem();
     ~BookmarksItem();
 
 private:
@@ -55,7 +55,7 @@ private:
 class ObjectItem : public StandardItemWithId
 {
 public:
-    ObjectItem(QObject *object);
+    explicit ObjectItem(QObject *object);
     ~ObjectItem();
 
 private:
@@ -72,7 +72,7 @@ protected:
 class NoteItem : public ObjectItem
 {
 public:
-    NoteItem(Note *note);
+    explicit NoteItem(Note *note);
     ~NoteItem();
 
 private:
@@ -85,7 +85,7 @@ private:
 class NotesItem : public ObjectItem
 {
 public:
-    NotesItem(Notes *notes);
+    explicit NotesItem(Notes *notes);
     ~NotesItem();
 
     void sync();
@@ -99,7 +99,7 @@ private:
 class ActItem : public ObjectItem
 {
 public:
-    ActItem(ScreenplayElement *element);
+    explicit ActItem(ScreenplayElement *element);
     ~ActItem();
 
     void updateText();
@@ -111,7 +111,7 @@ private:
 class EpisodeItem : public ObjectItem
 {
 public:
-    EpisodeItem(ScreenplayElement *element);
+    explicit EpisodeItem(ScreenplayElement *element);
     ~EpisodeItem();
 
     void updateText();
@@ -495,7 +495,7 @@ void NotebookModel::syncScenes()
 void NotebookModel::syncCharacters()
 {
     Structure *structure = m_document->structure();
-    ObjectListPropertyModel<Character *> *charactersModel = structure->charactersModel();
+    QObjectListModel<Character *> *charactersModel = structure->charactersModel();
 
     QList<QStandardItem *> characterItems =
             this->findItems(QStringLiteral("Characters"), Qt::MatchExactly, 0);
@@ -758,6 +758,8 @@ ActItem::ActItem(ScreenplayElement *element) : ObjectItem(element), m_element(el
     auto callUpdateText = [=]() { this->updateText(); };
     m_connections << QObject::connect(element, &ScreenplayElement::breakTitleChanged,
                                       callUpdateText);
+    m_connections << QObject::connect(element, &ScreenplayElement::breakSubtitleChanged,
+                                      callUpdateText);
     this->setData(NotebookModel::ActBreakType, NotebookModel::TypeRole);
     this->setData(QVariant::fromValue<QObject *>(element), NotebookModel::ObjectRole);
 }
@@ -766,7 +768,10 @@ ActItem::~ActItem() { }
 
 void ActItem::updateText()
 {
-    this->setText(m_element->breakTitle());
+    if (m_element->breakSubtitle().isEmpty())
+        this->setText(m_element->breakTitle());
+    else
+        this->setText(m_element->breakTitle() + QStringLiteral(": ") + m_element->breakSubtitle());
 }
 
 EpisodeItem::EpisodeItem(ScreenplayElement *element) : ObjectItem(element), m_element(element)
@@ -845,6 +850,8 @@ StoryNode *StoryNode::create(ScriteDocument *document)
                 StoryNode *parentNode = episodeNode ? episodeNode : screenplayNode;
 
                 if (actNode == nullptr && !parentNode->childNodes.isEmpty()) {
+                    // User has not created an Act 1, so we are going to create Act 1
+                    // node just for the sake of the notebook model.
                     actNode = new StoryNode;
                     actNode->actName = QStringLiteral("ACT 1");
                     actNode->childNodes = parentNode->childNodes;
@@ -891,7 +898,7 @@ StoryNode *StoryNode::create(ScriteDocument *document)
 
 ///////////////////////////////////////////////////////////////////////////////
 
-BookmarkedNotes::BookmarkedNotes(QObject *parent) : ObjectListPropertyModel<QObject *>(parent)
+BookmarkedNotes::BookmarkedNotes(QObject *parent) : QObjectListModel<QObject *>(parent)
 {
     this->reload();
 }

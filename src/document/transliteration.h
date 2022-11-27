@@ -1,7 +1,7 @@
 /****************************************************************************
 **
-** Copyright (C) TERIFLIX Entertainment Spaces Pvt. Ltd. Bengaluru
-** Author: Prashanth N Udupa (prashanth.udupa@teriflix.com)
+** Copyright (C) VCreate Logic Pvt. Ltd. Bengaluru
+** Author: Prashanth N Udupa (prashanth@scrite.io)
 **
 ** This code is distributed under GPL v3. Complete text of the license
 ** can be found here: https://www.gnu.org/licenses/gpl-3.0.txt
@@ -30,6 +30,7 @@
 
 #include "qobjectproperty.h"
 
+class AppWindow;
 class QTextCursor;
 class QTextDocument;
 class QCoreApplication;
@@ -71,6 +72,10 @@ public:
     QString languageAsString() const;
     static QString languageAsString(Language language);
 
+    Q_PROPERTY(QList<int> enabledLanguages READ enabledLanguages NOTIFY enabledLanguagesChanged)
+    QList<int> enabledLanguages() const { return m_enabledLanguages; }
+    Q_SIGNAL void enabledLanguagesChanged();
+
     Q_PROPERTY(QJsonObject alphabetMappings READ alphabetMappings NOTIFY languageChanged)
     QJsonObject alphabetMappings() const { return this->alphabetMappingsFor(m_language); }
 
@@ -102,7 +107,8 @@ public:
     Q_INVOKABLE QString
     textInputSourceIdForLanguage(TransliterationEngine::Language language) const;
 
-    Q_PROPERTY(QJsonObject languageTextInputSourceMap READ languageTextInputSourceMap NOTIFY languageTextInputSourceMapChanged)
+    Q_PROPERTY(QJsonObject languageTextInputSourceMap READ languageTextInputSourceMap NOTIFY
+                       languageTextInputSourceMapChanged)
     QJsonObject languageTextInputSourceMap() const;
     Q_SIGNAL void languageTextInputSourceMapChanged();
 
@@ -155,12 +161,18 @@ public:
 
     Q_INVOKABLE QString formattedHtmlOf(const QString &text) const;
 
+    Q_INVOKABLE static int wordCount(const QString &text);
+
 private:
+    friend class AppWindow;
     TransliterationEngine(QObject *parent = nullptr);
+    void setEnabledLanguages(const QList<int> &val);
+    void determineEnabledLanguages();
 
 private:
     void *m_transliterator = nullptr;
     Language m_language = English;
+    QList<int> m_enabledLanguages;
     QMap<Language, QString> m_tisMap;
     QMap<Language, bool> m_activeLanguages;
     QMap<Language, int> m_languageBundledFontId;
@@ -169,17 +181,103 @@ private:
     mutable QMap<Language, QStringList> m_availableLanguageFontFamilies;
 };
 
+struct TextFragment;
+class SpellCheckService;
+class FontSyntaxHighlighterUserData;
 class FontSyntaxHighlighter : public QSyntaxHighlighter
 {
     Q_OBJECT
+    QML_ELEMENT
+    QML_UNCREATABLE("Use Transliterator.highlighter")
 
 public:
-    FontSyntaxHighlighter(QObject *parent = nullptr);
+    explicit FontSyntaxHighlighter(QObject *parent = nullptr);
     ~FontSyntaxHighlighter();
+
+    Q_PROPERTY(bool enforceDefaultFont READ isEnforceDefaultFont WRITE setEnforceDefaultFont NOTIFY
+                       enforceDefaultFontChanged)
+    void setEnforceDefaultFont(bool val);
+    bool isEnforceDefaultFont() const { return m_enforceDefaultFont; }
+    Q_SIGNAL void enforceDefaultFontChanged();
+
+    Q_PROPERTY(bool enforceHeadingFontSize READ isEnforceHeadingFontSize WRITE
+                       setEnforceHeadingFontSize NOTIFY enforceHeadingFontSizeChanged)
+    void setEnforceHeadingFontSize(bool val);
+    bool isEnforceHeadingFontSize() const { return m_enforceHeadingFontSize; }
+    Q_SIGNAL void enforceHeadingFontSizeChanged();
+
+    Q_PROPERTY(bool spellCheckEnabled READ isSpellCheckEnabled WRITE setSpellCheckEnabled NOTIFY
+                       spellCheckEnabledChanged)
+    void setSpellCheckEnabled(bool val);
+    bool isSpellCheckEnabled() const { return m_spellCheckEnabled; }
+    Q_SIGNAL void spellCheckEnabledChanged();
+
+    Q_PROPERTY(int cursorPosition READ cursorPosition WRITE setCursorPosition NOTIFY
+                       cursorPositionChanged)
+    void setCursorPosition(int val);
+    int cursorPosition() const { return m_cursorPosition; }
+    Q_SIGNAL void cursorPositionChanged();
+
+    Q_PROPERTY(bool wordUnderCursorIsMisspelled READ isWordUnderCursorIsMisspelled NOTIFY
+                       wordUnderCursorIsMisspelledChanged)
+    bool isWordUnderCursorIsMisspelled() const { return m_wordUnderCursorIsMisspelled; }
+    Q_SIGNAL void wordUnderCursorIsMisspelledChanged();
+
+    Q_PROPERTY(QStringList spellingSuggestionsForWordUnderCursor READ
+                       spellingSuggestionsForWordUnderCursor NOTIFY
+                               spellingSuggestionsForWordUnderCursorChanged)
+    QStringList spellingSuggestionsForWordUnderCursor() const { return m_spellingSuggestions; }
+    Q_SIGNAL void spellingSuggestionsForWordUnderCursorChanged();
+
+    Q_INVOKABLE QStringList spellingSuggestionsForWordAt(int cursorPosition) const;
+
+    Q_INVOKABLE void replaceWordAt(int position, const QString &with);
+    Q_INVOKABLE void replaceWordUnderCursor(const QString &with)
+    {
+        this->replaceWordAt(m_cursorPosition, with);
+    }
+
+    Q_INVOKABLE void addWordAtPositionToDictionary(int position);
+    Q_INVOKABLE void addWordUnderCursorToDictionary()
+    {
+        this->addWordAtPositionToDictionary(m_cursorPosition);
+    }
+
+    Q_INVOKABLE void addWordAtPositionToIgnoreList(int position);
+    Q_INVOKABLE void addWordUnderCursorToIgnoreList()
+    {
+        this->addWordAtPositionToIgnoreList(m_cursorPosition);
+    }
+
+    // show spelling suggestions in SpellingSuggestionsMenu { }
+    // Apply spelling corrections from the menu
+    // Insert this functionality in all index cards and synopsis editors in Notebook.
+
+signals:
+    void spellingMistakesDetected();
 
 protected:
     // QSyntaxHighlighter interface
     void highlightBlock(const QString &text);
+
+private:
+    void onContentsChange(int position, int charsRemoved, int charsAdded);
+    void setWordUnderCursorIsMisspelled(bool val);
+    void setSpellingSuggestionsForWordUnderCursor(const QStringList &val);
+
+    bool wordCursor(int cursorPosition, QTextCursor &cursor,
+                    FontSyntaxHighlighterUserData *&ud) const;
+    bool findMisspelledTextFragment(int cursorPosition, TextFragment &fragment) const;
+    void checkForSpellingMistakeInCurrentWord();
+
+private:
+    friend class FontSyntaxHighlighterUserData;
+    int m_cursorPosition = -1;
+    bool m_spellCheckEnabled = false;
+    bool m_enforceDefaultFont = true;
+    bool m_enforceHeadingFontSize = false;
+    QStringList m_spellingSuggestions;
+    bool m_wordUnderCursorIsMisspelled = false;
 };
 
 class Transliterator : public QObject
@@ -199,35 +297,63 @@ public:
     bool isEnabled() const { return m_enabled; }
     Q_SIGNAL void enabledChanged();
 
-    Q_PROPERTY(QQuickTextDocument* textDocument READ textDocument WRITE setTextDocument NOTIFY textDocumentChanged RESET resetTextDocument)
+    Q_PROPERTY(QQuickTextDocument *textDocument READ textDocument WRITE setTextDocument NOTIFY
+                       textDocumentChanged RESET resetTextDocument)
     void setTextDocument(QQuickTextDocument *val);
     QQuickTextDocument *textDocument() const { return m_textDocument; }
     Q_SIGNAL void textDocumentChanged();
 
-    Q_PROPERTY(bool textDocumentUndoRedoEnabled READ isTextDocumentUndoRedoEnabled WRITE setTextDocumentUndoRedoEnabled NOTIFY textDocumentUndoRedoEnabledChanged)
+    Q_PROPERTY(bool textDocumentUndoRedoEnabled READ isTextDocumentUndoRedoEnabled WRITE
+                       setTextDocumentUndoRedoEnabled NOTIFY textDocumentUndoRedoEnabledChanged)
     void setTextDocumentUndoRedoEnabled(bool val);
     bool isTextDocumentUndoRedoEnabled() const { return m_textDocumentUndoRedoEnabled; }
     Q_SIGNAL void textDocumentUndoRedoEnabledChanged();
 
-    Q_PROPERTY(int cursorPosition READ cursorPosition WRITE setCursorPosition NOTIFY cursorPositionChanged)
+    Q_PROPERTY(int cursorPosition READ cursorPosition WRITE setCursorPosition NOTIFY
+                       cursorPositionChanged)
     void setCursorPosition(int val);
     int cursorPosition() const { return m_cursorPosition; }
     Q_SIGNAL void cursorPositionChanged();
 
-    Q_PROPERTY(bool hasActiveFocus READ hasActiveFocus WRITE setHasActiveFocus NOTIFY hasActiveFocusChanged)
+    Q_PROPERTY(bool hasActiveFocus READ hasActiveFocus WRITE setHasActiveFocus NOTIFY
+                       hasActiveFocusChanged)
     void setHasActiveFocus(bool val);
     bool hasActiveFocus() const { return m_hasActiveFocus; }
     Q_SIGNAL void hasActiveFocusChanged();
 
-    Q_PROPERTY(bool applyLanguageFonts READ isApplyLanguageFonts WRITE setApplyLanguageFonts NOTIFY applyLanguageFontsChanged)
+    Q_PROPERTY(bool applyLanguageFonts READ isApplyLanguageFonts WRITE setApplyLanguageFonts NOTIFY
+                       applyLanguageFontsChanged)
     void setApplyLanguageFonts(bool val);
     bool isApplyLanguageFonts() const { return m_applyLanguageFonts; }
     Q_SIGNAL void applyLanguageFontsChanged();
 
-    Q_PROPERTY(bool transliterateCurrentWordOnly READ isTransliterateCurrentWordOnly WRITE setTransliterateCurrentWordOnly NOTIFY transliterateCurrentWordOnlyChanged)
+    Q_PROPERTY(bool enforeDefaultFont READ isEnforeDefaultFont WRITE setEnforeDefaultFont NOTIFY
+                       enforeDefaultFontChanged)
+    void setEnforeDefaultFont(bool val);
+    bool isEnforeDefaultFont() const { return m_enforeDefaultFont; }
+    Q_SIGNAL void enforeDefaultFontChanged();
+
+    Q_PROPERTY(bool enforceHeadingFontSize READ isEnforceHeadingFontSize WRITE
+                       setEnforceHeadingFontSize NOTIFY enforceHeadingFontSizeChanged)
+    void setEnforceHeadingFontSize(bool val);
+    bool isEnforceHeadingFontSize() const { return m_enforceHeadingFontSize; }
+    Q_SIGNAL void enforceHeadingFontSizeChanged();
+
+    Q_PROPERTY(bool spellCheckEnabled READ isSpellCheckEnabled WRITE setSpellCheckEnabled NOTIFY
+                       spellCheckEnabledChanged)
+    void setSpellCheckEnabled(bool val);
+    bool isSpellCheckEnabled() const { return m_spellCheckEnabled; }
+    Q_SIGNAL void spellCheckEnabledChanged();
+
+    Q_PROPERTY(bool transliterateCurrentWordOnly READ isTransliterateCurrentWordOnly WRITE
+                       setTransliterateCurrentWordOnly NOTIFY transliterateCurrentWordOnlyChanged)
     void setTransliterateCurrentWordOnly(bool val);
     bool isTransliterateCurrentWordOnly() const { return m_transliterateCurrentWordOnly; }
     Q_SIGNAL void transliterateCurrentWordOnlyChanged();
+
+    Q_PROPERTY(FontSyntaxHighlighter *highlighter READ highlighter NOTIFY highlighterChanged)
+    FontSyntaxHighlighter *highlighter() const { return m_fontHighlighter; }
+    Q_SIGNAL void highlighterChanged();
 
     Q_INVOKABLE void enableFromNextWord() { m_enableFromNextWord = true; }
 
@@ -259,11 +385,14 @@ private:
 
 private:
     bool m_enabled = true;
+    bool m_enforeDefaultFont = true;
+    bool m_enforceHeadingFontSize = false;
     bool m_enableFromNextWord = false;
     Mode m_mode = AutomaticMode;
     int m_cursorPosition = -1;
     bool m_hasActiveFocus = false;
     bool m_applyLanguageFonts = false;
+    bool m_spellCheckEnabled = false;
     bool m_transliterateCurrentWordOnly = true;
     bool m_textDocumentUndoRedoEnabled = false;
     QPointer<FontSyntaxHighlighter> m_fontHighlighter;
@@ -275,8 +404,9 @@ class TransliterationEvent : public QEvent
 public:
     static QEvent::Type EventType();
 
-    TransliterationEvent(int start, int end, const QString &original,
-                         TransliterationEngine::Language language, const QString &replacement);
+    explicit TransliterationEvent(int start, int end, const QString &original,
+                                  TransliterationEngine::Language language,
+                                  const QString &replacement);
     ~TransliterationEvent();
 
     int start() const { return m_start; }
@@ -299,7 +429,7 @@ class TransliteratedText : public QQuickPaintedItem
     QML_ELEMENT
 
 public:
-    TransliteratedText(QQuickItem *parent = nullptr);
+    explicit TransliteratedText(QQuickItem *parent = nullptr);
     ~TransliteratedText();
 
     Q_PROPERTY(QString text READ text WRITE setText NOTIFY textChanged)
@@ -345,6 +475,49 @@ private:
     qreal m_contentHeight = 0;
     QStaticText m_staticText;
     ExecLaterTimer m_updateTimer;
+};
+
+class TransliterationHints : public QObject
+{
+    Q_OBJECT
+    QML_ELEMENT
+    QML_ATTACHED(TransliterationHints)
+
+public:
+    ~TransliterationHints();
+
+    static TransliterationHints *qmlAttachedProperties(QObject *object);
+
+    static TransliterationHints *find(QQuickItem *item);
+
+    enum AllowedMechanism {
+        NoMechanism = 0,
+        StaticMechanism = 1,
+        TextInputSourceMechanism = 2,
+        AllMechanisms = 3
+    };
+    Q_DECLARE_FLAGS(AllowedMechanisms, AllowedMechanism)
+    Q_FLAG(AllowedMechanisms)
+
+    Q_PROPERTY(AllowedMechanisms allowedMechanisms READ allowedMechanisms WRITE setAllowedMechanisms
+                       NOTIFY allowedMechanismsChanged)
+    void setAllowedMechanisms(AllowedMechanisms val);
+    AllowedMechanisms allowedMechanisms() const { return m_allowedMechanisms; }
+    Q_SIGNAL void allowedMechanismsChanged();
+
+private:
+    TransliterationHints(QObject *parent = nullptr);
+
+private:
+    AllowedMechanisms m_allowedMechanisms = AllMechanisms;
+};
+
+class TransliterationUtils
+{
+public:
+    static void polishFontsAndInsertTextAtCursor(
+            QTextCursor &cursor, const QString &text,
+            const QVector<QTextLayout::FormatRange> &formats = QVector<QTextLayout::FormatRange>());
 };
 
 #endif // TRANSLITERATION_H

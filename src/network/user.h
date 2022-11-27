@@ -1,7 +1,7 @@
 /****************************************************************************
 **
-** Copyright (C) TERIFLIX Entertainment Spaces Pvt. Ltd. Bengaluru
-** Author: Prashanth N Udupa (prashanth.udupa@teriflix.com)
+** Copyright (C) VCreate Logic Pvt. Ltd. Bengaluru
+** Author: Prashanth N Udupa (prashanth@scrite.io)
 **
 ** This code is distributed under GPL v3. Complete text of the license
 ** can be found here: https://www.gnu.org/licenses/gpl-3.0.txt
@@ -68,6 +68,10 @@ public:
     QJsonArray installations() const { return m_installations; }
     Q_SIGNAL void installationsChanged();
 
+    Q_PROPERTY(QJsonObject helpTips READ helpTips NOTIFY helpTipsChanged)
+    QJsonObject helpTips() const { return m_helpTips; }
+    Q_SIGNAL void helpTipsChanged();
+
     Q_PROPERTY(QStringList locations READ locations CONSTANT)
     Q_INVOKABLE static QStringList locations();
 
@@ -103,9 +107,12 @@ private:
     User(QObject *parent = nullptr);
     void setInfo(const QJsonObject &val);
     void setInstallations(const QJsonArray &val);
+    void setHelpTips(const QJsonObject &val);
+    void loadStoredHelpTips();
 
     Q_SLOT void firstReload();
 
+    void fetchHelpTips();
     void reset();
     void activateCallDone();
     void userInfoCallDone();
@@ -124,6 +131,7 @@ private:
 private:
     bool m_busy = false;
     QJsonObject m_info;
+    QJsonObject m_helpTips;
     QTimer m_touchLogTimer;
     QList<int> m_enabledFeatures;
     QJsonArray m_installations;
@@ -136,7 +144,7 @@ private:
 class UserIconProvider : public QQuickImageProvider
 {
 public:
-    UserIconProvider();
+    explicit UserIconProvider();
     ~UserIconProvider();
 
     // QQuickImageProvider interface
@@ -149,7 +157,7 @@ class AppFeature : public QObject
     QML_ELEMENT
 
 public:
-    AppFeature(QObject *parent = nullptr);
+    explicit AppFeature(QObject *parent = nullptr);
     ~AppFeature();
 
     Q_PROPERTY(QString featureName READ featureName WRITE setFeatureName NOTIFY featureNameChanged)

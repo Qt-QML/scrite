@@ -1,7 +1,7 @@
 /****************************************************************************
 **
-** Copyright (C) TERIFLIX Entertainment Spaces Pvt. Ltd. Bengaluru
-** Author: Prashanth N Udupa (prashanth.udupa@teriflix.com)
+** Copyright (C) VCreate Logic Pvt. Ltd. Bengaluru
+** Author: Prashanth N Udupa (prashanth@scrite.io)
 **
 ** This code is distributed under GPL v3. Complete text of the license
 ** can be found here: https://www.gnu.org/licenses/gpl-3.0.txt
@@ -19,12 +19,13 @@ import QtQuick.Controls 2.15
 import io.scrite.components 1.0
 
 Item {
+    id: aboutBox
     readonly property real splashWidth: 1464
     readonly property real splashHeight: 978
     readonly property real iscale: (ui.width * 0.5)/splashWidth
     readonly property real ascale: width/splashWidth
-    width: Math.max(iscale * splashWidth, 973)
-    height: Math.max(iscale * splashHeight, 650)
+    width: 973
+    height: 650
 
     Component.onCompleted: {
         modalDialog.closeUponClickOutsideContentArea = true
@@ -46,17 +47,17 @@ Item {
 
             Text {
                 id: versionText
-                x: 60 * ascale
-                y: 135 * ascale
-                font.pixelSize: 18
-                color: "white"
+                anchors.top: parent.top
+                anchors.right: parent.right
+                anchors.margins: 30
+                font.pointSize: Scrite.app.idealFontPointSize + 2
                 text: Scrite.app.applicationVersion
-                font.letterSpacing: applicationSettings.enableAnimations ? 10 : 0
+                font.letterSpacing: applicationSettings.enableAnimations ? 20 : 0
 
                 NumberAnimation {
                     target: versionText
                     property: "font.letterSpacing"
-                    from: 10; to: 0
+                    from: 20; to: 0
                     duration: 1500
                     running: true && applicationSettings.enableAnimations
                     easing.type: Easing.OutBack
@@ -67,9 +68,9 @@ Item {
                 font.pixelSize: 12
                 anchors.horizontalCenter: parent.horizontalCenter
                 text: "Build Timestamp:\n" + Scrite.app.buildTimestamp
-                anchors.left: versionText.left
+                anchors.left: parent.left
                 anchors.bottom: parent.bottom
-                anchors.bottomMargin: versionText.x
+                anchors.margins: 30
             }
 
             Column {
@@ -77,111 +78,28 @@ Item {
                 anchors.centerIn: parent
 
                 Image {
-                    source: "../images/appicon.png"
-                    width: 92; height: 92
-                    mipmap: true; smooth: true
+                    source: "../images/scrite_logo_for_report_header.png"
+                    width: aboutBox.width * 0.3
+                    fillMode: Image.PreserveAspectFit
                     anchors.horizontalCenter: parent.horizontalCenter
-                }
-
-                Text {
-                    font.pixelSize: 20
-                    text: "<font color=\"gray\">WRITE YOUR NEXT BLOCKBUSTER!</font><br/><font color=\"blue\">https://www.scrite.io</font>"
-                    horizontalAlignment: Text.AlignHCenter
-                    anchors.horizontalCenter: parent.horizontalCenter
-
-                    MouseArea {
-                        anchors.fill: parent
-                        cursorShape: Qt.PointingHandCursor
-                        onClicked: Qt.openUrlExternally("https://www.scrite.io")
-                    }
+                    mipmap: true
                 }
 
                 Item {
                     width: parent.width
-                    height: 30
+                    height: 14
                 }
 
-                Row {
+                Text {
+                    text: "This app is released under <strong>GPLv3</strong>.<br/><font color=\"blue\">Click here</font> to view the license terms."
+                    font.pointSize: Scrite.app.idealFontPointSize
                     anchors.horizontalCenter: parent.horizontalCenter
-                    spacing: 20
+                    color: "gray"
 
-                    Column {
-                        id: links1
-                        spacing: 20
-                        anchors.top: parent.top
-
-                        Text {
-                            text: "Using <strong>PhoneticTranslator</strong><br/><font color=\"blue\">https://sourceforge.net/projects/phtranslator/</font>"
-                            font.pointSize: Scrite.app.idealFontPointSize - 2
-
-                            MouseArea {
-                                anchors.fill: parent
-                                cursorShape: Qt.PointingHandCursor
-                                onClicked: Qt.openUrlExternally("https://sourceforge.net/projects/phtranslator/")
-                            }
-                        }
-
-                        Text {
-                            text: "Using <strong>Sonnet</strong> from KDE Frameworks 5<br/><font color=\"blue\">https://api.kde.org/frameworks/sonnet/html/index.html</font>"
-                            font.pointSize: Scrite.app.idealFontPointSize - 2
-
-                            MouseArea {
-                                anchors.fill: parent
-                                cursorShape: Qt.PointingHandCursor
-                                onClicked: Qt.openUrlExternally("https://api.kde.org/frameworks/sonnet/html/index.html")
-                            }
-                        }
-
-                        Text {
-                            text: "Using <strong>QuaZip</strong><br/><font color=\"blue\">https://github.com/stachenov/quazip</font>"
-                            font.pointSize: Scrite.app.idealFontPointSize - 2
-
-                            MouseArea {
-                                anchors.fill: parent
-                                cursorShape: Qt.PointingHandCursor
-                                onClicked: Qt.openUrlExternally("https://github.com/stachenov/quazip")
-                            }
-                        }
-
-                    }
-
-                    Column {
-                        id: links2
-                        spacing: 20
-                        anchors.top: parent.top
-
-                        Text {
-                            text: "Developed using <strong>Qt " + Scrite.app.qtVersion + "</strong><br/><font color=\"blue\">https://www.qt.io</font>"
-                            font.pointSize: Scrite.app.idealFontPointSize - 2
-
-                            MouseArea {
-                                anchors.fill: parent
-                                cursorShape: Qt.PointingHandCursor
-                                onClicked: Qt.openUrlExternally("https://www.qt.io")
-                            }
-                        }
-
-                        Text {
-                            text: "Using <strong>SimpleCrypt</strong>.<br/><font color=\"blue\">Click here</font> to know more."
-                            font.pointSize: Scrite.app.idealFontPointSize - 2
-
-                            MouseArea {
-                                anchors.fill: parent
-                                cursorShape: Qt.PointingHandCursor
-                                onClicked: Qt.openUrlExternally("https://wiki.qt.io/Simple_encryption_with_SimpleCrypt")
-                            }
-                        }
-
-                        Text {
-                            text: "Using <strong>Curved Arrows</strong>.<br/><font color=\"blue\">Click here</font> to know more."
-                            font.pointSize: Scrite.app.idealFontPointSize - 2
-
-                            MouseArea {
-                                anchors.fill: parent
-                                cursorShape: Qt.PointingHandCursor
-                                onClicked: Qt.openUrlExternally("https://github.com/dragonman225/curved-arrows")
-                            }
-                        }
+                    MouseArea {
+                        anchors.fill: parent
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: aboutBoxPages.currentIndex = 1
                     }
                 }
 
@@ -191,14 +109,86 @@ Item {
                 }
 
                 Text {
-                    text: "This app is released under <strong>GPLv3</strong>. <font color=\"blue\">Click here</font> to view the license terms."
+                    text: "The app uses:"
                     font.pointSize: Scrite.app.idealFontPointSize - 2
                     anchors.horizontalCenter: parent.horizontalCenter
+                }
 
-                    MouseArea {
+                Rectangle {
+                    width: aboutBox.width * 0.5
+                    height: (creditsViewFontMetrics.height+creditsView.spacing) * creditsView.model.count + creditsView.anchors.topMargin + creditsView.anchors.bottomMargin
+                    color: creditsView.ScrollBar.vertical.needed ? primaryColors.c100.background : Qt.rgba(0,0,0,0)
+
+                    FontMetrics {
+                        id: creditsViewFontMetrics
+                        font.pointSize: Scrite.app.idealFontPointSize - 2
+                    }
+
+                    ListView {
+                        id: creditsView
                         anchors.fill: parent
-                        cursorShape: Qt.PointingHandCursor
-                        onClicked: aboutBoxPages.currentIndex = 1
+                        anchors.margins: 3
+                        spacing: 7
+                        clip: true
+                        ScrollBar.vertical: ScrollBar2 {
+                            flickable: creditsView
+                        }
+                        model: ListModel {
+                            ListElement {
+                                credits: "<strong>Phonetic Translator</strong> library for providing static transliteration."
+                                url: "https://sourceforge.net/projects/phtranslator/"
+                            }
+
+                            ListElement {
+                                credits: "<strong>Sonnet</strong> from KDE Frameworks for powering English spell check."
+                                url: "https://api.kde.org/frameworks/sonnet/html/index.html"
+                            }
+
+                            ListElement {
+                                credits: "<strong>QuaZip</strong> for (un)compressing Scrite documents."
+                                url: "https://github.com/stachenov/quazip"
+                            }
+
+                            ListElement {
+                                credits: "<strong>SimpleCrypt</strong> for encrypting Scrite documents."
+                                url: "https://wiki.qt.io/Simple_encryption_with_SimpleCrypt"
+                            }
+
+                            ListElement {
+                                credits: "<strong>Curved-Arrows</strong> library for evaluating curved arrow connectors."
+                                url: "https://github.com/dragonman225/curved-arrows"
+                            }
+
+                            ListElement {
+                                credits: "<strong>QuillJS</strong> for powering rich text editor in Notebook."
+                                url: "https://quilljs.com/"
+                            }
+
+                            ListElement {
+                                credits: "<strong>Qt</strong> 5.15 LTS for developing the entire app."
+                                url: "https://www.qt.io"
+                            }
+                        }
+                        delegate: Label {
+                            required property string credits
+                            required property url url
+
+                            id: creditLabel
+                            text: credits
+                            color: creditLabelMouseArea.containsMouse ? "blue" : "black"
+                            width: ListView.view.width - (creditsView.ScrollBar.vertical.needed ? 20 : 0)
+                            wrapMode: Text.WordWrap
+                            font.pointSize: Scrite.app.idealFontPointSize - 2
+                            horizontalAlignment: Text.AlignHCenter
+
+                            MouseArea {
+                                id: creditLabelMouseArea
+                                anchors.fill: parent
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: Qt.openUrlExternally(url)
+                                hoverEnabled: true
+                            }
+                        }
                     }
                 }
 
@@ -221,13 +211,13 @@ Item {
                     }
 
                     Button2 {
-                        text: "Help"
+                        text: "Learning Guides"
                         onClicked: Qt.openUrlExternally("https://www.scrite.io/index.php/help/")
                     }
 
                     Button2 {
-                        text: "Feedback"
-                        onClicked: Qt.openUrlExternally("https://www.scrite.io/index.php/forum/")
+                        text: "Discord"
+                        onClicked: Qt.openUrlExternally("https://discord.gg/bGHquFX5jK")
                     }
                 }
             }

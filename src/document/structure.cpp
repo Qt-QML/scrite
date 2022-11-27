@@ -1,7 +1,7 @@
 /****************************************************************************
 **
-** Copyright (C) TERIFLIX Entertainment Spaces Pvt. Ltd. Bengaluru
-** Author: Prashanth N Udupa (prashanth.udupa@teriflix.com)
+** Copyright (C) VCreate Logic Pvt. Ltd. Bengaluru
+** Author: Prashanth N Udupa (prashanth@scrite.io)
 **
 ** This code is distributed under GPL v3. Complete text of the license
 ** can be found here: https://www.gnu.org/licenses/gpl-3.0.txt
@@ -20,9 +20,11 @@
 #include "application.h"
 #include "focustracker.h"
 #include "timeprofiler.h"
+#include "deltadocument.h"
 #include "scritedocument.h"
 #include "garbagecollector.h"
 #include "structureexporter.h"
+#include "screenplaytextdocument.h"
 
 #include <QDir>
 #include <QtMath>
@@ -32,6 +34,9 @@
 #include <QMimeData>
 #include <QDateTime>
 #include <QJSEngine>
+#include <QTextList>
+#include <QTextTable>
+#include <QTextFrame>
 #include <QClipboard>
 #include <QScopeGuard>
 #include <QQuickWindow>
@@ -438,7 +443,7 @@ void StructureElement::renameCharacter(const QString &from, const QString &to)
 ///////////////////////////////////////////////////////////////////////////////
 
 StructureElementStack::StructureElementStack(QObject *parent)
-    : ObjectListPropertyModel<StructureElement *>(parent)
+    : QObjectListModel<StructureElement *>(parent)
 {
     StructureElementStacks *stacks = qobject_cast<StructureElementStacks *>(parent);
     if (stacks)
@@ -551,7 +556,7 @@ void StructureElementStack::timerEvent(QTimerEvent *te)
         m_initializeTimer.stop();
         this->initialize();
     } else
-        ObjectListPropertyModel<StructureElement *>::timerEvent(te);
+        QObjectListModel<StructureElement *>::timerEvent(te);
 }
 
 void StructureElementStack::itemInsertEvent(StructureElement *ptr)
@@ -832,7 +837,7 @@ void StructureElementStack::onStructureCurrentElementChanged()
 ///////////////////////////////////////////////////////////////////////////////
 
 StructureElementStacks::StructureElementStacks(QObject *parent)
-    : ObjectListPropertyModel<StructureElementStack *>(parent)
+    : QObjectListModel<StructureElementStack *>(parent)
 {
 }
 
@@ -1151,10 +1156,16 @@ Character::Character(QObject *parent)
     connect(this, &Character::relationshipCountChanged, this, &Character::characterChanged);
     connect(this, &Character::characterRelationshipGraphChanged, this,
             &Character::characterChanged);
+    connect(this, &Character::keyPhotoChanged, this, &Character::characterChanged);
     connect(m_attachments, &Attachments::attachmentsModified, this, &Character::characterChanged);
 
     DocumentFileSystem *dfs = ScriteDocument::instance()->fileSystem();
     connect(dfs, &DocumentFileSystem::auction, this, &Character::onDfsAuction);
+
+    connect(this, &Character::photosChanged, this, [=]() {
+        const int min = m_photos.isEmpty() ? -1 : 0;
+        this->setKeyPhotoIndex(qBound(min, m_keyPhotoIndex, m_photos.size() - 1));
+    });
 
     if (m_structure) {
         connect(this, &Character::tagsChanged, m_structure,
@@ -1193,8 +1204,8 @@ bool Character::rename(const QString &name)
 
         {
             int nrReplacements = 0;
-            const QString newSummary =
-                    Application::replaceCharacterName(m_name, name, m_summary, &nrReplacements);
+            const QJsonObject newSummary = Application::replaceCharacterName(
+                    m_name, name, m_summary.toObject(), &nrReplacements);
             if (nrReplacements > 0) {
                 m_summary = newSummary;
                 emit summaryChanged();
@@ -1291,6 +1302,18 @@ void Character::removePhoto(const QString &photoPath)
     this->removePhoto(index);
 }
 
+void Character::setKeyPhotoIndex(int val)
+{
+    const int val2 = qBound(-1, val, m_photos.size() - 1);
+    if (m_keyPhotoIndex != val2) {
+        m_keyPhotoIndex = val2;
+        emit keyPhotoIndexChanged();
+    }
+
+    const QString kp = val2 >= 0 ? m_photos.at(val2) : QString();
+    this->setKeyPhoto(kp);
+}
+
 void Character::setType(const QString &val)
 {
     if (m_type == val)
@@ -1375,7 +1398,7 @@ void Character::setColor(const QColor &val)
     emit colorChanged();
 }
 
-void Character::setSummary(const QString &val)
+void Character::setSummary(const QJsonValue &val)
 {
     if (m_summary == val)
         return;
@@ -1636,7 +1659,7 @@ void Character::serializeToJson(QJsonObject &json) const
 void Character::deserializeFromJson(const QJsonObject &json)
 {
     DocumentFileSystem *dfs = m_structure->scriteDocument()->fileSystem();
-    const QJsonArray array = json.value("photos").toArray();
+    const QJsonArray array = json.value(QStringLiteral("photos")).toArray();
 
     QStringList photoPaths;
     for (int i = 0; i < array.size(); i++) {
@@ -1658,6 +1681,12 @@ void Character::deserializeFromJson(const QJsonObject &json)
     if (m_photos != photoPaths) {
         m_photos = photoPaths;
         emit photosChanged();
+    }
+
+    const QString kpiAttr = QStringLiteral("keyPhotoIndex");
+    if (json.contains(kpiAttr)) {
+        const int kpi = json.value(kpiAttr).toInt();
+        this->setKeyPhotoIndex(kpi);
     }
 
     // Previously notes was an array, because the notes property used to be
@@ -1689,6 +1718,156 @@ void Character::resolveRelationships()
 {
     for (Relationship *rel : m_relationships.constList())
         rel->resolveRelationship();
+}
+
+void Character::write(QTextCursor &cursor, const WriteOptions &options) const
+{
+    QTextDocument &document = *cursor.document();
+
+    // Character name
+    QTextBlockFormat characaterNameBlockFormat;
+    characaterNameBlockFormat.setTopMargin(10);
+    characaterNameBlockFormat.setHeadingLevel(options.headingLevel);
+
+    QTextCharFormat characterNameCharFormat;
+    characterNameCharFormat.setFontWeight(QFont::Bold);
+    characterNameCharFormat.setFontPointSize(
+            ScreenplayTextDocument::headingFontPointSize(options.headingLevel));
+    characaterNameBlockFormat.setTopMargin(characterNameCharFormat.fontPointSize() / 2);
+
+    if (cursor.block().text().isEmpty()) {
+        cursor.setBlockCharFormat(characterNameCharFormat);
+        cursor.setBlockFormat(characaterNameBlockFormat);
+    } else
+        cursor.insertBlock(characaterNameBlockFormat, characterNameCharFormat);
+
+    cursor.insertText(m_name);
+
+    // Character meta-data table
+    QTextTableFormat tableFormat;
+    tableFormat.setCellPadding(2);
+    tableFormat.setCellSpacing(0);
+    tableFormat.setLeftMargin(10);
+    tableFormat.setTopMargin(10);
+    tableFormat.setBottomMargin(10);
+
+    QTextFrame *frame = cursor.currentFrame();
+    QTextTable *table = cursor.insertTable(6, this->hasKeyPhoto() ? 3 : 2, tableFormat);
+    QTextTableCellFormat cellFormat; // = table->cellAt(0, 0).format();
+    cellFormat.setBorderStyle(QTextFrameFormat::BorderStyle_None);
+    for (int tr = 0; tr < table->rows(); tr++) {
+        for (int tc = 0; tc < table->columns(); tc++) {
+            table->cellAt(tr, tc).setFormat(cellFormat);
+        }
+    }
+
+    if (this->hasKeyPhoto()) {
+        table->mergeCells(0, 0, 6, 1);
+
+        const QImage image(this->keyPhoto());
+        const qreal imageScale = 120.0 / image.width();
+        const QSizeF imageSize = image.size() * imageScale;
+        const QUrl imageName(
+                QLatin1String("character://") + m_name.toLatin1().toHex() + QLatin1String("/")
+                + QString::number(m_structure->indexOfCharacter(const_cast<Character *>(this))));
+        document.addResource(QTextDocument::ImageResource, imageName, image);
+
+        QTextImageFormat imageFormat;
+        imageFormat.setWidth(imageSize.width());
+        imageFormat.setHeight(imageSize.height());
+        imageFormat.setName(imageName.toString());
+
+        cursor = table->cellAt(0, 0).firstCursorPosition();
+        cursor.insertImage(imageFormat);
+    }
+
+    const int col = this->hasKeyPhoto() ? 1 : 0;
+
+    table->mergeCells(0, col, 1, 2);
+    cursor = table->cellAt(0, col).firstCursorPosition();
+    cursor.insertText(QLatin1String("Role: ") + this->designation());
+
+    table->mergeCells(1, col, 1, 2);
+    cursor = table->cellAt(1, col).firstCursorPosition();
+    cursor.insertText(QLatin1String("Tags: ") + this->tags().join(QLatin1String(", ")));
+
+    table->mergeCells(2, col, 1, 2);
+    cursor = table->cellAt(2, col).firstCursorPosition();
+    cursor.insertText(QLatin1String("Aliases: ") + this->aliases().join(QLatin1String(", ")));
+
+    cursor = table->cellAt(3, col).firstCursorPosition();
+    cursor.insertText(QLatin1String("Type: ") + this->type());
+
+    cursor = table->cellAt(3, col + 1).firstCursorPosition();
+    cursor.insertText(QLatin1String("Gender: ") + this->gender());
+
+    cursor = table->cellAt(4, col).firstCursorPosition();
+    cursor.insertText(QLatin1String("Age: ") + this->age());
+
+    cursor = table->cellAt(4, col + 1).firstCursorPosition();
+    cursor.insertText(QLatin1String("Body Type: ") + this->bodyType());
+
+    cursor = table->cellAt(5, col).firstCursorPosition();
+    cursor.insertText(QLatin1String("Height: ") + this->height());
+
+    cursor = table->cellAt(5, col + 1).firstCursorPosition();
+    cursor.insertText(QLatin1String("Weight: ") + this->weight());
+
+    cursor = frame->lastCursorPosition();
+
+    // Character Summary
+    auto addSection = [&cursor, options](const QString &sectionName) {
+        QTextBlockFormat sectionBlockFormat;
+        sectionBlockFormat.setHeadingLevel(options.headingLevel + 1);
+
+        QTextCharFormat sectionCharFormat;
+        sectionCharFormat.setFontWeight(QFont::Bold);
+        sectionCharFormat.setFontPointSize(
+                ScreenplayTextDocument::headingFontPointSize(options.headingLevel));
+        sectionBlockFormat.setTopMargin(sectionCharFormat.fontPointSize() / 2);
+
+        cursor.insertBlock(sectionBlockFormat, sectionCharFormat);
+        cursor.insertText(sectionName);
+
+        QTextBlockFormat nextBlockFormat;
+        nextBlockFormat.setHeadingLevel(0);
+
+        QTextCharFormat nextCharFormat;
+        nextCharFormat.setFontWeight(QFont::Normal);
+        nextCharFormat.setFontPointSize(cursor.document()->defaultFont().pointSizeF());
+        nextBlockFormat.setTopMargin(nextCharFormat.fontPointSize() / 2);
+
+        cursor.insertBlock(nextBlockFormat, nextCharFormat);
+    };
+
+    if (options.includeSummary) {
+        if (m_summary.isString()) {
+            const QString summary = m_summary.toString();
+            if (!summary.isEmpty()) {
+                addSection(QLatin1String("Summary"));
+                TransliterationUtils::polishFontsAndInsertTextAtCursor(cursor, summary);
+            }
+        } else {
+            const QJsonObject summary = m_summary.toObject();
+            if (!summary.isEmpty()) {
+                const DeltaDocument::ResolveResult result = DeltaDocument::blockingResolve(summary);
+                if (!result.htmlText.isEmpty()) {
+                    addSection(QLatin1String("Summary"));
+                    cursor.insertHtml(result.htmlText);
+                }
+            }
+        }
+    }
+
+    // Character notes
+    if (options.includeTextNotes || options.includeFormNotes) {
+        if (m_notes) {
+            Notes::WriteOptions notesOptions;
+            notesOptions.includeFormNotes = options.includeFormNotes;
+            notesOptions.includeTextNotes = options.includeTextNotes;
+            m_notes->write(cursor, notesOptions);
+        }
+    }
 }
 
 bool Character::event(QEvent *event)
@@ -1742,6 +1921,15 @@ void Character::onDfsAuction(const QString &filePath, int *claims)
     const QString absPath = ScriteDocument::instance()->fileSystem()->absolutePath(filePath);
     if (m_photos.contains(absPath))
         *claims = *claims + 1;
+}
+
+void Character::setKeyPhoto(const QString &val)
+{
+    if (m_keyPhoto == val)
+        return;
+
+    m_keyPhoto = val;
+    emit keyPhotoChanged();
 }
 
 void Character::staticAppendRelationship(QQmlListProperty<Relationship> *list, Relationship *ptr)
@@ -2475,6 +2663,15 @@ void Structure::setCanvasUIMode(Structure::CanvasUIMode val)
     emit canvasUIModeChanged();
 }
 
+void Structure::setIndexCardContent(IndexCardContent val)
+{
+    if (m_indexCardContent == val)
+        return;
+
+    m_indexCardContent = val;
+    emit indexCardContentChanged();
+}
+
 qreal Structure::snapToGrid(qreal val) const
 {
     return Structure::snapToGrid(val, this);
@@ -2551,6 +2748,11 @@ void Structure::removeCharacter(Character *ptr)
 Character *Structure::characterAt(int index) const
 {
     return index < 0 || index >= m_characters.size() ? nullptr : m_characters.at(index);
+}
+
+int Structure::indexOfCharacter(Character *ptr) const
+{
+    return ptr == nullptr ? -1 : m_characters.indexOf(ptr);
 }
 
 void Structure::setCharacters(const QList<Character *> &list)
@@ -2713,9 +2915,9 @@ void Structure::removeElement(StructureElement *ptr)
     disconnect(ptr, &StructureElement::sceneLocationChanged, this,
                &Structure::updateLocationHeadingMapLater);
     disconnect(ptr, &StructureElement::geometryChanged, &m_elements,
-               &ObjectListPropertyModel<StructureElement *>::objectChanged);
+               &QObjectListModel<StructureElement *>::objectChanged);
     disconnect(ptr, &StructureElement::aboutToDelete, &m_elements,
-               &ObjectListPropertyModel<StructureElement *>::objectDestroyed);
+               &QObjectListModel<StructureElement *>::objectDestroyed);
     disconnect(ptr, &StructureElement::stackIdChanged, &m_elementStacks,
                &StructureElementStacks::evaluateStacksLater);
     this->updateLocationHeadingMapLater();
@@ -2733,6 +2935,15 @@ void Structure::removeElement(StructureElement *ptr)
 
     if (ptr->parent() == this)
         GarbageCollector::instance()->add(ptr);
+}
+
+void Structure::removeElements(const QList<StructureElement *> &elements)
+{
+    if (elements.isEmpty())
+        return;
+
+    for (StructureElement *element : elements)
+        this->removeElement(element);
 }
 
 void Structure::insertElement(StructureElement *ptr, int index)
@@ -2762,9 +2973,9 @@ void Structure::insertElement(StructureElement *ptr, int index)
     connect(ptr, &StructureElement::sceneLocationChanged, this,
             &Structure::updateLocationHeadingMapLater);
     connect(ptr, &StructureElement::geometryChanged, &m_elements,
-            &ObjectListPropertyModel<StructureElement *>::objectChanged);
+            &QObjectListModel<StructureElement *>::objectChanged);
     connect(ptr, &StructureElement::aboutToDelete, &m_elements,
-            &ObjectListPropertyModel<StructureElement *>::objectDestroyed);
+            &QObjectListModel<StructureElement *>::objectDestroyed);
     connect(ptr, &StructureElement::stackIdChanged, &m_elementStacks,
             &StructureElementStacks::evaluateStacksLater);
     this->updateLocationHeadingMapLater();
@@ -2813,9 +3024,9 @@ void Structure::setElements(const QList<StructureElement *> &list)
         connect(element, &StructureElement::sceneLocationChanged, this,
                 &Structure::updateLocationHeadingMapLater);
         connect(element, &StructureElement::geometryChanged, &m_elements,
-                &ObjectListPropertyModel<StructureElement *>::objectChanged);
+                &QObjectListModel<StructureElement *>::objectChanged);
         connect(element, &StructureElement::aboutToDelete, &m_elements,
-                &ObjectListPropertyModel<StructureElement *>::objectDestroyed);
+                &QObjectListModel<StructureElement *>::objectDestroyed);
         connect(element, &StructureElement::stackIdChanged, &m_elementStacks,
                 &StructureElementStacks::evaluateStacksLater);
         this->onStructureElementSceneChanged(element);
@@ -3597,9 +3808,9 @@ void Structure::addAnnotation(Annotation *ptr)
     connect(ptr, &Annotation::aboutToDelete, this, &Structure::removeAnnotation);
     connect(ptr, &Annotation::annotationChanged, this, &Structure::structureChanged);
     connect(ptr, &Annotation::geometryChanged, &m_annotations,
-            &ObjectListPropertyModel<Annotation *>::objectChanged);
+            &QObjectListModel<Annotation *>::objectChanged);
     connect(ptr, &Annotation::aboutToDelete, &m_annotations,
-            &ObjectListPropertyModel<Annotation *>::objectDestroyed);
+            &QObjectListModel<Annotation *>::objectDestroyed);
 
     emit annotationCountChanged();
 }
@@ -3628,9 +3839,9 @@ void Structure::removeAnnotation(Annotation *ptr)
     disconnect(ptr, &Annotation::aboutToDelete, this, &Structure::removeAnnotation);
     disconnect(ptr, &Annotation::annotationChanged, this, &Structure::structureChanged);
     disconnect(ptr, &Annotation::geometryChanged, &m_annotations,
-               &ObjectListPropertyModel<Annotation *>::objectChanged);
+               &QObjectListModel<Annotation *>::objectChanged);
     disconnect(ptr, &Annotation::aboutToDelete, &m_annotations,
-               &ObjectListPropertyModel<Annotation *>::objectDestroyed);
+               &QObjectListModel<Annotation *>::objectDestroyed);
 
     emit annotationCountChanged();
 
@@ -3705,9 +3916,9 @@ void Structure::setAnnotations(const QList<Annotation *> &list)
         connect(ptr, &Annotation::aboutToDelete, this, &Structure::removeAnnotation);
         connect(ptr, &Annotation::annotationChanged, this, &Structure::structureChanged);
         connect(ptr, &Annotation::geometryChanged, &m_annotations,
-                &ObjectListPropertyModel<Annotation *>::objectChanged);
+                &QObjectListModel<Annotation *>::objectChanged);
         connect(ptr, &Annotation::aboutToDelete, &m_annotations,
-                &ObjectListPropertyModel<Annotation *>::objectDestroyed);
+                &QObjectListModel<Annotation *>::objectDestroyed);
     }
 
     m_annotations.assign(list);
@@ -4100,7 +4311,7 @@ void Structure::copy(QObject *elementOrAnnotation)
 
         QMimeData *mimeData = new QMimeData;
         mimeData->setData(QStringLiteral("scrite/structure"), clipboardText);
-#ifndef QT_NO_DEBUG
+#ifndef QT_NO_DEBUG_OUTPUT
         mimeData->setData(QStringLiteral("text/plain"), clipboardText);
 #endif
         clipboard->setMimeData(mimeData);
@@ -4189,7 +4400,7 @@ static inline QJsonObject fetchPasteDataFromClipboard(QString *className = nullp
                                          .arg(imageBytes.constData())
                                          .arg(imageSize.height())
                                          .arg(imageSize.width());
-            data = QJsonDocument::fromJson(json.toLatin1()).object();
+            data = QJsonDocument::fromJson(json.toUtf8()).object();
             if (className)
                 *className = QLatin1String(Annotation::staticMetaObject.className());
         } else if (url.isValid()) {
@@ -4206,7 +4417,7 @@ static inline QJsonObject fetchPasteDataFromClipboard(QString *className = nullp
                                                 "    \"type\": \"url\""
                                                 "}")
                                          .arg(url.toString());
-            data = QJsonDocument::fromJson(json.toLatin1()).object();
+            data = QJsonDocument::fromJson(json.toUtf8()).object();
             if (className)
                 *className = QLatin1String(Annotation::staticMetaObject.className());
         } else if (mimeData->hasText()) {
@@ -4254,7 +4465,7 @@ static inline QJsonObject fetchPasteDataFromClipboard(QString *className = nullp
                                          .arg(mimeData->text())
                                          .arg(qCeil(textHeight))
                                          .arg(qCeil(textWidth));
-            data = QJsonDocument::fromJson(json.toLatin1()).object();
+            data = QJsonDocument::fromJson(json.toUtf8()).object();
             if (className)
                 *className = QLatin1String(Annotation::staticMetaObject.className());
         }
@@ -4452,6 +4663,79 @@ QStringList Structure::sortCharacterNames(const QStringList &givenNames) const
     return names;
 }
 
+void Structure::write(QTextCursor &cursor, const WriteOptions &options) const
+{
+    if (options.includeTextNotes || options.includeFormNotes) {
+        if (options.charactersOnly) {
+            const QList<Character *> characters = m_characters.list();
+            const QStringList allCharacterNames = m_characterNames;
+            const QStringList infoLessCharacterNames = [=]() -> QStringList {
+                QStringList ret = allCharacterNames;
+                for (const Character *character : characters)
+                    ret.removeOne(character->name());
+                return ret;
+            }();
+            const QString title = [=]() -> QString {
+                QString ret = m_scriteDocument->screenplay()->title();
+                if (ret.isEmpty())
+                    ret = QLatin1String("Untitled Screenplay");
+                return ret;
+            }();
+
+            if (allCharacterNames.isEmpty()) {
+                cursor.insertText(QLatin1String("No characters found in this screenplay."));
+            } else {
+                // First, export all character names and known meta-data in one table.
+                cursor.insertText(QLatin1String("Names of all characters:"));
+                cursor.insertBlock();
+
+                QTextFrame *frame = cursor.currentFrame();
+                QTextListFormat charactersListFormat;
+                charactersListFormat.setStyle(QTextListFormat::ListDecimal);
+                charactersListFormat.setNumberSuffix(QLatin1String(".  "));
+                QTextList *charactersList = cursor.insertList(charactersListFormat);
+
+                for (int i = 0; i < allCharacterNames.size(); i++) {
+                    const QString characterName = allCharacterNames.at(i);
+                    cursor.insertText(characterName);
+                    if (i != allCharacterNames.size() - 1)
+                        cursor.insertBlock();
+                }
+
+                cursor = frame->lastCursorPosition();
+                cursor.insertBlock();
+                charactersList->remove(cursor.block());
+
+                QTextBlockFormat pageBreakFormat;
+                pageBreakFormat.setPageBreakPolicy(QTextBlockFormat::PageBreak_AlwaysAfter);
+                cursor.insertBlock(pageBreakFormat);
+                cursor.insertText(QLatin1String("  "));
+
+                // Then export one character per page.
+                for (int i = 0; i < characters.size(); i++) {
+                    Character *character = characters.at(i);
+
+                    Character::WriteOptions options;
+                    options.headingLevel = 2;
+                    character->write(cursor, options);
+
+                    if (i != characters.size() - 1) {
+                        QTextBlockFormat pageBreakFormat;
+                        pageBreakFormat.setPageBreakPolicy(QTextBlockFormat::PageBreak_AlwaysAfter);
+                        cursor.insertBlock(pageBreakFormat);
+                        cursor.insertText(QLatin1String("  "));
+                    }
+                }
+            }
+        } else if (m_notes) {
+            Notes::WriteOptions notesOptions;
+            notesOptions.includeFormNotes = options.includeFormNotes;
+            notesOptions.includeTextNotes = options.includeTextNotes;
+            m_notes->write(cursor, notesOptions);
+        }
+    }
+}
+
 bool Structure::event(QEvent *event)
 {
     if (event->type() == QEvent::ParentChange)
@@ -4614,6 +4898,7 @@ void Structure::onStructureElementSceneChanged(StructureElement *element)
     }
 
     this->updateLocationHeadingMapLater();
+    this->updateCharacterNamesShotsTransitionsAndTagsLater();
 }
 
 void Structure::onSceneElementChanged(SceneElement *element, Scene::SceneElementChangeType)
@@ -4651,15 +4936,16 @@ void Structure::updateCharacterNamesShotsTransitionsAndTags()
         emit characterNamesChanged();
     }
 
-    if (tags.values() != m_characterTags) {
+    const QStringList tagValues = tags.values();
+    if (tagValues != m_characterTags) {
         m_characterTags = tags.values();
         emit characterTagsChanged();
     }
 
     const QStringList shots = [=]() {
-        QSet<QString> set = m_shotElementMap.shots().toSet();
-        set += defaultShots().toSet();
-        QStringList ret = set.toList();
+        QSet<QString> set = QSet<QString>::fromList(m_shotElementMap.shots());
+        set += QSet<QString>::fromList(defaultShots());
+        QStringList ret = QStringList::fromSet(set);
         std::sort(ret.begin(), ret.end());
         return ret;
     }();
@@ -4669,9 +4955,9 @@ void Structure::updateCharacterNamesShotsTransitionsAndTags()
     }
 
     const QStringList transitions = [=]() {
-        QSet<QString> set = m_transitionElementMap.transitions().toSet();
-        set += defaultTransitions().toSet();
-        QStringList ret = set.toList();
+        QSet<QString> set = QSet<QString>::fromList(m_transitionElementMap.transitions());
+        set += QSet<QString>::fromList(defaultTransitions());
+        QStringList ret = QStringList::fromSet(set);
         std::sort(ret.begin(), ret.end());
         return ret;
     }();
@@ -5261,8 +5547,8 @@ bool StructureCanvasViewportFilterModel::filterAcceptsRow(int source_row,
     if (!m_enabled || m_viewportRect.size().isEmpty())
         return true;
 
-    const ObjectListPropertyModelBase *model =
-            qobject_cast<ObjectListPropertyModelBase *>(this->sourceModel());
+    const AbstractQObjectListModel *model =
+            qobject_cast<AbstractQObjectListModel *>(this->sourceModel());
     if (model == nullptr)
         return true;
 
@@ -5316,9 +5602,9 @@ void StructureCanvasViewportFilterModel::updateSourceModel()
 void StructureCanvasViewportFilterModel::invalidateSelf()
 {
     m_visibleSourceRows.clear();
-    const ObjectListPropertyModelBase *model = m_computeStrategy == OnDemandComputeStrategy
+    const AbstractQObjectListModel *model = m_computeStrategy == OnDemandComputeStrategy
             ? nullptr
-            : qobject_cast<ObjectListPropertyModelBase *>(this->sourceModel());
+            : qobject_cast<AbstractQObjectListModel *>(this->sourceModel());
     if (model == nullptr || m_computeStrategy == OnDemandComputeStrategy) {
         this->invalidateFilter();
         return;

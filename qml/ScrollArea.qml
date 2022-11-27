@@ -1,7 +1,7 @@
 /****************************************************************************
 **
-** Copyright (C) TERIFLIX Entertainment Spaces Pvt. Ltd. Bengaluru
-** Author: Prashanth N Udupa (prashanth.udupa@teriflix.com)
+** Copyright (C) VCreate Logic Pvt. Ltd. Bengaluru
+** Author: Prashanth N Udupa (prashanth@scrite.io)
 **
 ** This code is distributed under GPL v3. Complete text of the license
 ** can be found here: https://www.gnu.org/licenses/gpl-3.0.txt
@@ -65,11 +65,13 @@ Flickable {
     signal zoomScaleChangedInteractively()
 
     function zoomIn() {
-        zoomScale = Math.min(zoomScale*(1+scrollAreaSettings.zoomFactor), pinchHandler.maximumScale)
+        const zf = 1+scrollAreaSettings.zoomFactor
+        zoomScale = Math.min(zoomScale*zf, pinchHandler.maximumScale)
     }
 
     function zoomOut() {
-        zoomScale = Math.max(zoomScale*(1-scrollAreaSettings.zoomFactor), pinchHandler.minimumScale)
+        const zf = 1-scrollAreaSettings.zoomFactor
+        zoomScale = Math.max(zoomScale*zf, pinchHandler.minimumScale)
     }
 
     function zoomOne() {

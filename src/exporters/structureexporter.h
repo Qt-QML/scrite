@@ -1,7 +1,7 @@
 /****************************************************************************
 **
-** Copyright (C) TERIFLIX Entertainment Spaces Pvt. Ltd. Bengaluru
-** Author: Prashanth N Udupa (prashanth.udupa@teriflix.com)
+** Copyright (C) VCreate Logic Pvt. Ltd. Bengaluru
+** Author: Prashanth N Udupa (prashanth@scrite.io)
 **
 ** This code is distributed under GPL v3. Complete text of the license
 ** can be found here: https://www.gnu.org/licenses/gpl-3.0.txt
@@ -23,7 +23,7 @@ class StructureExporter : public AbstractExporter
     Q_CLASSINFO("NameFilters", "Adobe PDF (*.pdf)")
 
 public:
-    Q_INVOKABLE StructureExporter(QObject *parent = nullptr);
+    Q_INVOKABLE explicit StructureExporter(QObject *parent = nullptr);
     ~StructureExporter();
 
     // AbstractExporter interface
@@ -42,6 +42,13 @@ public:
     void setEnableHeaderFooter(bool val);
     bool isEnableHeaderFooter() const { return m_enableHeaderFooter; }
     Q_SIGNAL void enableHeaderFooterChanged();
+
+    Q_CLASSINFO("preferFeaturedImage_FieldLabel", "Include featured image for scene, if available.")
+    Q_CLASSINFO("preferFeaturedImage_FieldEditor", "CheckBox")
+    Q_PROPERTY(bool preferFeaturedImage READ isPreferFeaturedImage WRITE setPreferFeaturedImage NOTIFY preferFeaturedImageChanged)
+    void setPreferFeaturedImage(bool val);
+    bool isPreferFeaturedImage() const { return m_preferFeaturedImage; }
+    Q_SIGNAL void preferFeaturedImageChanged();
 
     Q_CLASSINFO("watermark_FieldLabel", "Watermark text, if enabled.")
     Q_CLASSINFO("watermark_FieldEditor", "TextBox")
@@ -66,6 +73,7 @@ private:
     bool m_enableHeaderFooter = true;
     QString m_comment;
     QString m_watermark;
+    bool m_preferFeaturedImage = false;
 };
 
 #endif // STRUCTUREEXPORTER_H

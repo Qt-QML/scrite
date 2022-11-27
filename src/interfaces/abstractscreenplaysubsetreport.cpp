@@ -1,7 +1,7 @@
 /****************************************************************************
 **
-** Copyright (C) TERIFLIX Entertainment Spaces Pvt. Ltd. Bengaluru
-** Author: Prashanth N Udupa (prashanth.udupa@teriflix.com)
+** Copyright (C) VCreate Logic Pvt. Ltd. Bengaluru
+** Author: Prashanth N Udupa (prashanth@scrite.io)
 **
 ** This code is distributed under GPL v3. Complete text of the license
 ** can be found here: https://www.gnu.org/licenses/gpl-3.0.txt
@@ -51,6 +51,24 @@ void AbstractScreenplaySubsetReport::setIncludeSceneSynopsis(bool val)
     emit includeSceneSynopsisChanged();
 }
 
+void AbstractScreenplaySubsetReport::setIncludeSceneFeaturedImage(bool val)
+{
+    if (m_includeSceneFeaturedImage == val)
+        return;
+
+    m_includeSceneFeaturedImage = val;
+    emit includeSceneFeaturedImageChanged();
+}
+
+void AbstractScreenplaySubsetReport::setIncludeSceneComments(bool val)
+{
+    if (m_includeSceneComments == val)
+        return;
+
+    m_includeSceneComments = val;
+    emit includeSceneCommentsChanged();
+}
+
 void AbstractScreenplaySubsetReport::setIncludeSceneContents(bool val)
 {
     if (m_includeSceneContents == val)
@@ -85,6 +103,15 @@ void AbstractScreenplaySubsetReport::setPrintEachSceneOnANewPage(bool val)
 
     m_printEachSceneOnANewPage = val;
     emit printEachSceneOnANewPageChanged();
+}
+
+void AbstractScreenplaySubsetReport::setIncludeActBreaks(bool val)
+{
+    if (m_includeActBreaks == val)
+        return;
+
+    m_includeActBreaks = val;
+    emit includeActBreaksChanged();
 }
 
 void AbstractScreenplaySubsetReport::setEpisodeNumbers(const QList<int> &val)
@@ -178,20 +205,25 @@ bool AbstractScreenplaySubsetReport::doGenerate(QTextDocument *textDocument)
                 continue;
         }
 
-        if ((element->elementType() == ScreenplayElement::BreakElementType
-             && element->breakType() == Screenplay::Episode)
+        if ((element->elementType() == ScreenplayElement::BreakElementType)
             || (element->scene() != nullptr && this->includeScreenplayElement(element))) {
             ScreenplayElement *element2 = new ScreenplayElement(m_screenplaySubset);
             element2->setElementType(element->elementType());
             if (element->elementType() == ScreenplayElement::BreakElementType) {
                 element2->setBreakType(element->breakType());
                 element2->setBreakTitle(element->breakTitle());
+                element2->setBreakSubtitle(element->breakSubtitle());
+                element2->setEpisodeIndex(element->episodeIndex());
+                element2->setActIndex(element->actIndex());
 
-                ScreenplayElement *lastElement =
-                        m_screenplaySubset->elementAt(m_screenplaySubset->elementCount() - 1);
-                if (lastElement && lastElement->elementType() == ScreenplayElement::BreakElementType
-                    && lastElement->breakType() == Screenplay::Episode)
-                    m_screenplaySubset->removeElement(lastElement);
+                if (element->breakType() == Screenplay::Episode) {
+                    ScreenplayElement *lastElement =
+                            m_screenplaySubset->elementAt(m_screenplaySubset->elementCount() - 1);
+                    if (lastElement
+                        && lastElement->elementType() == ScreenplayElement::BreakElementType
+                        && lastElement->breakType() == Screenplay::Episode)
+                        m_screenplaySubset->removeElement(lastElement);
+                }
             } else {
                 element2->setScene(element->scene());
                 element2->setProperty("#sceneNumber", element->sceneNumber());
@@ -224,6 +256,9 @@ bool AbstractScreenplaySubsetReport::doGenerate(QTextDocument *textDocument)
     stDoc.setFormatting(document->printFormat());
     stDoc.setTextDocument(textDocument);
     stDoc.setIncludeSceneSynopsis(m_includeSceneSynopsis);
+    stDoc.setIncludeSceneFeaturedImage(m_includeSceneFeaturedImage);
+    stDoc.setIncludeSceneComments(m_includeSceneComments);
+    stDoc.setIncludeActBreaks(m_includeActBreaks);
     stDoc.setInjection(this);
     this->configureScreenplayTextDocument(stDoc);
     stDoc.syncNow();

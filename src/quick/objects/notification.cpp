@@ -1,7 +1,7 @@
 /****************************************************************************
 **
-** Copyright (C) TERIFLIX Entertainment Spaces Pvt. Ltd. Bengaluru
-** Author: Prashanth N Udupa (prashanth.udupa@teriflix.com)
+** Copyright (C) VCreate Logic Pvt. Ltd. Bengaluru
+** Author: Prashanth N Udupa (prashanth@scrite.io)
 **
 ** This code is distributed under GPL v3. Complete text of the license
 ** can be found here: https://www.gnu.org/licenses/gpl-3.0.txt
@@ -69,6 +69,15 @@ void Notification::setTextColor(const QColor &val)
     emit textColorChanged();
 }
 
+void Notification::setImage(const QUrl &val)
+{
+    if (m_image == val)
+        return;
+
+    m_image = val;
+    emit imageChanged();
+}
+
 void Notification::setActive(bool val)
 {
     if (m_active == val)
@@ -134,6 +143,15 @@ void Notification::notifyButtonClick(int index)
     emit buttonClicked(index);
 
     this->setActive(false);
+}
+
+void Notification::notifyImageClick()
+{
+    if (!m_image.isEmpty()) {
+        emit imageClicked();
+
+        this->setActive(false);
+    }
 }
 
 void Notification::doAutoClose()
