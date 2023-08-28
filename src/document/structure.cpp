@@ -989,16 +989,12 @@ void StructureElementStacks::evaluateStacks()
          * we do not allow for follow to be set for sync by the newly created
          * structure element on the UI. This will result in invalid layouting
          */
-        QTimer *layoutTimer = new QTimer(this);
-        layoutTimer->setInterval(100);
-        connect(layoutTimer, &QTimer::timeout, [=]() {
+        QTimer::singleShot(100, this, [=]() {
             Screenplay *screenplay = m_structure->scriteDocument()
                     ? m_structure->scriteDocument()->screenplay()
                     : ScriteDocument::instance()->screenplay();
             m_structure->placeElementsInBeatBoardLayout(screenplay);
-            layoutTimer->deleteLater();
         });
-        layoutTimer->start();
     }
 }
 
@@ -2571,11 +2567,7 @@ Structure::Structure(QObject *parent)
     connect(clipboard, &QClipboard::dataChanged, this, &Structure::onClipboardDataChanged);
 
     // Load clipboard data after the constructor returns
-    QTimer *clipboardTimer = new QTimer(this);
-    clipboardTimer->setSingleShot(true);
-    connect(clipboardTimer, &QTimer::timeout, this, &Structure::onClipboardDataChanged);
-    connect(clipboardTimer, &QTimer::timeout, clipboardTimer, &QTimer::deleteLater);
-    clipboardTimer->start();
+    QTimer::singleShot(0, this, &Structure::onClipboardDataChanged);
 
     m_elementsBoundingBoxAggregator.setModel(&m_elements);
     m_elementsBoundingBoxAggregator.setAggregateFunction(
@@ -2908,6 +2900,12 @@ void Structure::removeElement(StructureElement *ptr)
                 ptr, this, "elements", ObjectList::RemoveOperation, methods));
     }
 
+    const Scene *scene = ptr->scene();
+    const QList<SceneElement *> sceneElements = scene->findChildren<SceneElement *>();
+    for (SceneElement *sceneElement : sceneElements)
+        this->onAboutToRemoveSceneElement(sceneElement);
+    this->updateCharacterNamesShotsTransitionsAndTagsLater();
+
     m_elements.removeAt(index);
 
     disconnect(ptr, &StructureElement::elementChanged, this, &Structure::structureChanged);
@@ -3207,7 +3205,7 @@ QRectF Structure::layoutElements(Structure::LayoutType layoutType)
 
 void Structure::setForceBeatBoardLayout(bool val)
 {
-    if (m_forceBeatBoardLayout == val)
+    if (m_forceBeatBoardLayout == val || m_deserializationStage == BeingDeserialized)
         return;
 
     m_forceBeatBoardLayout = val;
@@ -3217,7 +3215,7 @@ void Structure::setForceBeatBoardLayout(bool val)
                 [=]() {
                     this->placeElementsInBeatBoardLayout(ScriteDocument::instance()->screenplay());
                 },
-                250);
+                m_deserializationStage == JustDeserialized ? 1000 : 250);
     }
 
     emit forceBeatBoardLayoutChanged();
@@ -4558,6 +4556,11 @@ QObject *Structure::createExporterObject()
     return this->createExporter();
 }
 
+void Structure::prepareForDeserialization()
+{
+    m_deserializationStage = BeingDeserialized;
+}
+
 void Structure::serializeToJson(QJsonObject &) const
 {
     // Do nothing
@@ -4616,6 +4619,11 @@ void Structure::deserializeFromJson(const QJsonObject &json)
         m_notes->loadOldNotes(notes.toArray());
 
     this->updateCharacterNamesShotsTransitionsAndTagsLater();
+
+    m_deserializationStage = JustDeserialized;
+    if (json.value(QLatin1String("forceBeatBoardLayout")).toBool())
+        this->setForceBeatBoardLayout(true);
+    m_deserializationStage = FullyDeserialized;
 }
 
 bool Structure::canSetPropertyFromObjectList(const QString &propName) const

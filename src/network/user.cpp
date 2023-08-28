@@ -53,8 +53,6 @@ User::User(QObject *parent) : QObject(parent)
         JsonHttpRequest::store(QStringLiteral("sessionToken"), stok);
     }
 
-    QMetaObject::invokeMethod(this, "firstReload", Qt::QueuedConnection);
-
     connect(this, &User::infoChanged, this, &User::loggedInChanged);
     connect(this, &User::installationsChanged, this, &User::loggedInChanged);
 
@@ -69,6 +67,9 @@ User::User(QObject *parent) : QObject(parent)
         else
             m_touchLogTimer.stop();
     });
+
+    this->loadStoredUserInformation();
+    QMetaObject::invokeMethod(this, "firstReload", Qt::QueuedConnection, Q_ARG(bool, false));
 }
 
 User::~User() { }
@@ -187,7 +188,8 @@ void User::setInfo(const QJsonObject &val)
             QStringLiteral("notebook"),   QStringLiteral("relationshipgraph"),
             QStringLiteral("scriptalay"), QStringLiteral("template"),
             QStringLiteral("report"),     QStringLiteral("import"),
-            QStringLiteral("export"),     QStringLiteral("scrited")
+            QStringLiteral("export"),     QStringLiteral("scrited"),
+            QStringLiteral("watermark")
         };
         const QJsonArray features = m_info.value(QStringLiteral("enabledAppFeatures")).toArray();
         QSet<int> ifeatures;
@@ -318,9 +320,10 @@ void User::loadStoredHelpTips()
     emit helpTipsChanged();
 }
 
-void User::firstReload()
+void User::firstReload(bool loadStoredUserInfoAlso)
 {
-    this->loadStoredUserInformation();
+    if (loadStoredUserInfoAlso)
+        this->loadStoredUserInformation();
     this->fetchHelpTips();
     this->reload();
 }

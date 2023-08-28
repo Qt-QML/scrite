@@ -17,6 +17,8 @@
 #include <QQmlEngine>
 #include <QReadWriteLock>
 
+#include "application.h"
+
 class RefCounter : public QObject
 {
     Q_OBJECT
@@ -24,51 +26,24 @@ class RefCounter : public QObject
     QML_ATTACHED(RefCounter)
 
 public:
-    explicit RefCounter(QObject *parent = nullptr) : QObject(parent) { }
-    ~RefCounter() { }
+    explicit RefCounter(QObject *parent = nullptr);
+    ~RefCounter();
 
     static RefCounter *qmlAttachedProperties(QObject *object) { return new RefCounter(object); }
 
     Q_PROPERTY(int refCount READ refCount WRITE setRefCount NOTIFY refCountChanged)
-    int refCount() const
-    {
-        QReadLocker locker(&m_refCountLock);
-        return m_refCount;
-    }
+    int refCount() const;
     Q_SIGNAL void refCountChanged();
 
     Q_PROPERTY(bool isReffed READ isReffed NOTIFY refCountChanged)
-    bool isReffed() const { return m_refCount > 0; }
+    bool isReffed() const { return this->refCount() > 0; }
 
-    Q_INVOKABLE void ref() { this->setRefCount(m_refCount + 1); }
-    Q_INVOKABLE bool deref()
-    {
-        this->setRefCount(m_refCount - 1);
-        return this->isReffed();
-    }
-    Q_INVOKABLE bool reset()
-    {
-        const bool ret = m_refCount > 0;
-        this->setRefCount(0);
-        return ret;
-    }
+    Q_INVOKABLE void ref();
+    Q_INVOKABLE bool deref();
+    Q_INVOKABLE bool reset();
 
 private:
-    void setRefCount(int val)
-    {
-        {
-            QReadLocker locker(&m_refCountLock);
-            if (m_refCount == val)
-                return;
-        }
-
-        {
-            QWriteLocker locker(&m_refCountLock);
-            m_refCount = qMax(0, val);
-        }
-
-        emit refCountChanged();
-    }
+    void setRefCount(int val);
 
 private:
     int m_refCount = 0;

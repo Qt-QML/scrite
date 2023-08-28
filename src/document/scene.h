@@ -27,6 +27,7 @@
 #include <QQuickPaintedItem>
 #include <QAbstractListModel>
 #include <QQuickTextDocument>
+#include <QImage>
 
 #include "notes.h"
 #include "modifiable.h"
@@ -174,6 +175,11 @@ public:
     QString text() const { return m_text; }
     Q_SIGNAL void textChanged(const QString &val);
 
+    Q_PROPERTY(Qt::Alignment alignment READ alignment WRITE setAlignment NOTIFY alignmentChanged)
+    void setAlignment(Qt::Alignment val);
+    Qt::Alignment alignment() const { return m_alignment; }
+    Q_SIGNAL void alignmentChanged();
+
     Q_PROPERTY(int cursorPosition READ cursorPosition WRITE setCursorPosition NOTIFY
                        cursorPositionChanged STORED false)
     void setCursorPosition(int val);
@@ -181,6 +187,11 @@ public:
     Q_SIGNAL void cursorPositionChanged();
 
     QString formattedText() const;
+
+    bool polishText(Scene *previousScene = nullptr);
+    bool capitalizeSentences();
+    QList<int> autoCapitalizePositions() const;
+    static QList<int> autoCapitalizePositions(const QString &text);
 
     Q_PROPERTY(int wordCount READ wordCount NOTIFY wordCountChanged)
     int wordCount() const { return m_wordCount; }
@@ -216,6 +227,7 @@ private:
     mutable QString m_id;
     Type m_type = Action;
     QString m_text;
+    Qt::Alignment m_alignment;
     QVector<QTextLayout::FormatRange> m_textFormats;
     Scene *m_scene = nullptr;
     int m_wordCount = 0;
@@ -311,6 +323,9 @@ public:
     StructureElement *structureElement() const { return m_structureElement; }
     Q_SIGNAL void structureElementChanged();
 
+    Q_PROPERTY(bool empty READ isEmpty NOTIFY sceneChanged)
+    bool isEmpty() const;
+
     /*
      * The 'id' is a special property. It can be set only once. If it is not
      * set an ID is automatically generated whenever the property value is
@@ -321,20 +336,21 @@ public:
     QString id() const;
     Q_SIGNAL void idChanged();
 
-    Q_PROPERTY(QString name READ name NOTIFY titleChanged)
+    Q_PROPERTY(QString name READ name NOTIFY synopsisChanged)
     QString name() const;
 
-    Q_PROPERTY(QString title READ title WRITE setTitle NOTIFY titleChanged)
-    void setTitle(const QString &val);
-    QString title() const { return m_title; }
-    Q_SIGNAL void titleChanged();
+    Q_PROPERTY(QString title READ synopsis WRITE setSynopsis NOTIFY synopsisChanged STORED false)
+    Q_PROPERTY(QString synopsis READ synopsis WRITE setSynopsis NOTIFY synopsisChanged)
+    void setSynopsis(const QString &val);
+    QString synopsis() const { return m_synopsis; }
+    Q_SIGNAL void synopsisChanged();
 
-    void inferTitleFromContent();
+    void inferSynopsisFromContent();
 
-    Q_PROPERTY(bool hasTitle READ hasTitle NOTIFY titleChanged)
-    bool hasTitle() const { return !m_title.isEmpty(); }
+    Q_PROPERTY(bool hasSynopsis READ hasSynopsis NOTIFY synopsisChanged)
+    bool hasSynopsis() const { return !m_synopsis.isEmpty(); }
 
-    Q_INVOKABLE void trimTitle();
+    Q_INVOKABLE void trimSynopsis();
 
     Q_PROPERTY(QString emotionalChange READ emotionalChange WRITE setEmotionalChange NOTIFY
                        emotionalChangeChanged)
@@ -494,6 +510,9 @@ public:
     Q_INVOKABLE void beginUndoCapture(bool allowMerging = true);
     Q_INVOKABLE void endUndoCapture();
 
+    Q_INVOKABLE bool polishText(Scene *previousScene = nullptr);
+    Q_INVOKABLE bool capitalizeSentences();
+
     // Used by stats report generator code.
     QHash<QString, QList<SceneElement *>> dialogueElements() const;
 
@@ -568,7 +587,7 @@ private:
     QString m_act;
     Type m_type = Standard;
     QColor m_color = QColor(Qt::white);
-    QString m_title;
+    QString m_synopsis;
     QString m_comments;
     QStringList m_groups;
     QString m_emotionalChange;
@@ -637,27 +656,6 @@ public:
     bool trackFormatChanges() const { return m_trackFormatChanges; }
     Q_SIGNAL void trackFormatChangesChanged();
 
-    Q_PROPERTY(qreal leftMargin READ leftMargin WRITE setLeftMargin NOTIFY leftMarginChanged)
-    void setLeftMargin(qreal val);
-    qreal leftMargin() const { return m_leftMargin; }
-    Q_SIGNAL void leftMarginChanged();
-
-    Q_PROPERTY(qreal rightMargin READ rightMargin WRITE setRightMargin NOTIFY rightMarginChanged)
-    void setRightMargin(qreal val);
-    qreal rightMargin() const { return m_rightMargin; }
-    Q_SIGNAL void rightMarginChanged();
-
-    Q_PROPERTY(qreal topMargin READ topMargin WRITE setTopMargin NOTIFY topMarginChanged)
-    void setTopMargin(qreal val);
-    qreal topMargin() const { return m_topMargin; }
-    Q_SIGNAL void topMarginChanged();
-
-    Q_PROPERTY(
-            qreal bottomMargin READ bottomMargin WRITE setBottomMargin NOTIFY bottomMarginChanged)
-    void setBottomMargin(qreal val);
-    qreal bottomMargin() const { return m_bottomMargin; }
-    Q_SIGNAL void bottomMarginChanged();
-
     Q_PROPERTY(qreal contentWidth READ contentWidth NOTIFY contentWidthChanged)
     qreal contentWidth() const { return m_contentWidth; }
     Q_SIGNAL void contentWidthChanged();
@@ -665,6 +663,16 @@ public:
     Q_PROPERTY(qreal contentHeight READ contentHeight NOTIFY contentHeightChanged)
     qreal contentHeight() const { return m_contentHeight; }
     Q_SIGNAL void contentHeightChanged();
+
+    Q_PROPERTY(bool asynchronous READ isAsynchronous WRITE setAsynchronous NOTIFY asynchronousChanged)
+    void setAsynchronous(bool val);
+    bool isAsynchronous() const { return m_asynchronous; }
+    Q_SIGNAL void asynchronousChanged();
+
+    Q_PROPERTY(bool active READ isActive WRITE setActive NOTIFY activeChanged)
+    void setActive(bool val);
+    bool isActive() const { return m_active; }
+    Q_SIGNAL void activeChanged();
 
     Q_PROPERTY(bool hasPendingComputeSize READ hasPendingComputeSize NOTIFY
                        hasPendingComputeSizeChanged)
@@ -677,11 +685,12 @@ public:
 
 protected:
     void timerEvent(QTimerEvent *te);
+    QSGNode *updatePaintNode(QSGNode *oldNode, UpdatePaintNodeData *);
 
 private:
     void updateSize(const QSizeF &size);
-    QSizeF evaluateSizeHint();
-    void evaluateSizeHintLater();
+    void updateSizeAndImageLater();
+    void updateSizeAndImageNow();
     void sceneReset();
     void onSceneChanged();
     void formatReset();
@@ -692,13 +701,11 @@ private:
     void setHasPendingComputeSize(bool val);
 
 private:
-    qreal m_topMargin = 0;
-    qreal m_leftMargin = 0;
-    qreal m_rightMargin = 0;
-    qreal m_bottomMargin = 0;
+    bool m_active = true;
+    bool m_asynchronous = true;
     qreal m_contentWidth = 0;
     qreal m_contentHeight = 0;
-    QReadWriteLock m_lock;
+    QImage m_documentImage;
     bool m_componentComplete = false;
     bool m_trackSceneChanges = true;
     bool m_trackFormatChanges = true;

@@ -208,9 +208,6 @@ public:
     Q_INVOKABLE QPointF mapGlobalPositionToItem(QQuickItem *item, const QPointF &pos) const;
     Q_INVOKABLE bool isMouseOverItem(QQuickItem *item) const;
 
-    Q_INVOKABLE void execLater(QObject *context, int howMuchLater, const QJSValue &function,
-                               const QJSValueList &args = QJSValueList());
-
     Q_INVOKABLE static QColor translucent(const QColor &input, qreal alpha = 0.5);
 
     QSettings *settings() const { return m_settings; }
@@ -321,7 +318,7 @@ public:
 
     Q_SIGNAL void openFileRequest(const QString &filePath);
 
-    static QString sanitiseFileName(const QString &fileName);
+    static QString sanitiseFileName(const QString &fileName, QSet<QChar> *removedChars = nullptr);
 
     Q_INVOKABLE static void log(const QString &message);
 

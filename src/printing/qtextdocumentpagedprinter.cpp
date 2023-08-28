@@ -11,8 +11,11 @@
 **
 ****************************************************************************/
 
+#include "user.h"
+#include "scrite.h"
 #include "ruleritem.h"
 #include "application.h"
+#include "scritedocument.h"
 #include "qtextdocumentpagedprinter.h"
 
 #include <QDate>
@@ -187,13 +190,16 @@ void HeaderFooter::finish()
 Watermark::Watermark(QObject *parent) : QObject(parent)
 {
     m_padding[0] = 0;
+
+    m_enabled = !User::instance()->isFeatureEnabled(Scrite::WatermarkFeature);
+    m_visibleFromPageOne = !User::instance()->isFeatureEnabled(Scrite::WatermarkFeature);
 }
 
 Watermark::~Watermark() { }
 
 void Watermark::setEnabled(bool val)
 {
-    if (m_enabled == val)
+    if (m_enabled == val || !User::instance()->isFeatureEnabled(Scrite::WatermarkFeature))
         return;
 
     m_enabled = val;
@@ -202,7 +208,7 @@ void Watermark::setEnabled(bool val)
 
 void Watermark::setText(const QString &val)
 {
-    if (m_text == val)
+    if (m_text == val || !User::instance()->isFeatureEnabled(Scrite::WatermarkFeature))
         return;
 
     m_text = val;
@@ -211,7 +217,7 @@ void Watermark::setText(const QString &val)
 
 void Watermark::setFont(const QFont &val)
 {
-    if (m_font == val)
+    if (m_font == val || !User::instance()->isFeatureEnabled(Scrite::WatermarkFeature))
         return;
 
     m_font = val;
@@ -220,7 +226,7 @@ void Watermark::setFont(const QFont &val)
 
 void Watermark::setColor(const QColor &val)
 {
-    if (m_color == val)
+    if (m_color == val || !User::instance()->isFeatureEnabled(Scrite::WatermarkFeature))
         return;
 
     m_color = val;
@@ -229,7 +235,8 @@ void Watermark::setColor(const QColor &val)
 
 void Watermark::setOpacity(qreal val)
 {
-    if (qFuzzyCompare(m_opacity, val))
+    if (qFuzzyCompare(m_opacity, val)
+        || !User::instance()->isFeatureEnabled(Scrite::WatermarkFeature))
         return;
 
     m_opacity = val;
@@ -238,7 +245,8 @@ void Watermark::setOpacity(qreal val)
 
 void Watermark::setRotation(qreal val)
 {
-    if (qFuzzyCompare(m_rotation, val))
+    if (qFuzzyCompare(m_rotation, val)
+        || !User::instance()->isFeatureEnabled(Scrite::WatermarkFeature))
         return;
 
     m_rotation = val;
@@ -247,7 +255,7 @@ void Watermark::setRotation(qreal val)
 
 void Watermark::setAlignment(Qt::Alignment val)
 {
-    if (m_alignment == val)
+    if (m_alignment == val || !User::instance()->isFeatureEnabled(Scrite::WatermarkFeature))
         return;
 
     m_alignment = val;
@@ -256,7 +264,8 @@ void Watermark::setAlignment(Qt::Alignment val)
 
 void Watermark::setVisibleFromPageOne(bool val)
 {
-    if (m_visibleFromPageOne == val)
+    if (m_visibleFromPageOne == val
+        || !User::instance()->isFeatureEnabled(Scrite::WatermarkFeature))
         return;
 
     m_visibleFromPageOne = val;
@@ -265,7 +274,7 @@ void Watermark::setVisibleFromPageOne(bool val)
 
 void Watermark::setRect(const QRectF &val)
 {
-    if (m_rect == val)
+    if (m_rect == val || !User::instance()->isFeatureEnabled(Scrite::WatermarkFeature))
         return;
 
     m_rect = val;
@@ -523,20 +532,21 @@ bool QTextDocumentPagedPrinter::print(QTextDocument *document, QPagedPaintDevice
     m_progressReport->start();
     m_progressReport->setProgressStep(1 / qreal(doc->pageCount() + 1));
     int pageNr = fromPageNr;
+    QRectF pageRect;
 
     const bool isPdfDevice = printer->paintEngine()->type() == QPaintEngine::Pdf;
 
     // Print away!
     while (pageNr <= toPageNr) {
-        if (isPdfDevice)
-            this->printHeaderFooterWatermark(pageNr, toPageNr, &painter, doc, body);
-
         painter.save();
         painter.scale(contentScale.first, contentScale.second);
+        this->printPageContents(pageNr, toPageNr, &painter, doc, body, pageRect);
         if (!isPdfDevice)
-            this->printHeaderFooterWatermark(pageNr, toPageNr, &painter, doc, body);
-        this->printPageContents(pageNr, toPageNr, &painter, doc, body);
+            this->printHeaderFooterWatermark(pageNr, toPageNr, &painter, doc, body, pageRect);
         painter.restore();
+
+        if (isPdfDevice)
+            this->printHeaderFooterWatermark(pageNr, toPageNr, &painter, doc, body, pageRect);
 
         m_progressReport->tick();
 
@@ -559,61 +569,41 @@ bool QTextDocumentPagedPrinter::print(QTextDocument *document, QPagedPaintDevice
 void QTextDocumentPagedPrinter::loadSettings(HeaderFooter *header, HeaderFooter *footer,
                                              Watermark *watermark)
 {
-    const QSettings *settings = Application::instance()->settings();
-    auto fetchField = [settings](const QString &key, HeaderFooter::Field defaultValue) {
-        const QString settingsKey = "PageSetup/" + key;
-        const QVariant val = settings->value(settingsKey);
-        const int min = HeaderFooter::Nothing;
-        const int max = HeaderFooter::PageNumberOfCount;
-        if (!val.isValid() || val.toInt() < min || val.toInt() > max)
-            return defaultValue;
-        return HeaderFooter::Field(val.toInt());
-    };
+    const PageSetup *pageSetup = ScriteDocument::instance()->pageSetup();
 
     if (header != nullptr) {
-        header->setLeft(fetchField("headerLeft", HeaderFooter::Title));
-        header->setCenter(fetchField("headerCenter", HeaderFooter::Subtitle));
-        header->setRight(fetchField("headerRight", HeaderFooter::PageNumber));
-
-        const QVariant val = settings->value("PageSetup/headerOpacity");
-        if (val.isValid())
-            header->setOpacity(qBound(0.0, val.toDouble(), 1.0));
+        header->setLeft(HeaderFooter::Field(pageSetup->headerLeft()));
+        header->setCenter(HeaderFooter::Field(pageSetup->headerCenter()));
+        header->setRight(HeaderFooter::Field(pageSetup->headerRight()));
+        header->setOpacity(pageSetup->headerOpacity());
     }
 
     if (footer != nullptr) {
-        footer->setLeft(fetchField("footerLeft", HeaderFooter::Author));
-        footer->setCenter(fetchField("footerCenter", HeaderFooter::Version));
-        footer->setRight(fetchField("footerRight", HeaderFooter::Contact));
-
-        const QVariant val = settings->value("PageSetup/footerOpacity");
-        if (val.isValid())
-            footer->setOpacity(qBound(0.0, val.toDouble(), 1.0));
+        footer->setLeft(HeaderFooter::Field(pageSetup->footerLeft()));
+        footer->setCenter(HeaderFooter::Field(pageSetup->footerCenter()));
+        footer->setRight(HeaderFooter::Field(pageSetup->footerRight()));
+        footer->setOpacity(pageSetup->footerOpacity());
     }
 
-    auto fetchSetting = [settings](const QString &key, const QVariant &defaultValue) {
-        const QVariant val = settings->value("PageSetup/" + key);
-        return val.isValid() ? val : defaultValue;
-    };
-
     if (watermark != nullptr) {
-        watermark->setEnabled(fetchSetting("watermarkEnabled", watermark->isEnabled()).toBool());
-        watermark->setText(fetchSetting("watermarkText", watermark->text()).toString());
+        watermark->setEnabled(pageSetup->isWatermarkEnabled());
+        watermark->setText(pageSetup->watermarkText());
 
         QFont watermarkFont;
-        watermarkFont.setFamily(fetchSetting("watermarkFont", "Courier Prime").toString());
-        watermarkFont.setPointSize(fetchSetting("watermarkFontSize", 120).toInt());
+        watermarkFont.setFamily(pageSetup->watermarkFont());
+        watermarkFont.setPointSize(pageSetup->watermarkFontSize());
         watermark->setFont(watermarkFont);
 
-        watermark->setColor(QColor(fetchSetting("watermarkColor", "lightgray").toString()));
-        watermark->setOpacity(fetchSetting("watermarkOpacity", 0.5).toDouble());
-        watermark->setRotation(fetchSetting("watermarkRotation", 0.5).toDouble());
-        watermark->setAlignment(
-                Qt::Alignment(fetchSetting("watermarkAlignment", Qt::AlignCenter).toInt()));
+        watermark->setColor(pageSetup->watermarkColor());
+        watermark->setOpacity(pageSetup->watermarkOpacity());
+        watermark->setRotation(watermark->rotation());
+        watermark->setAlignment(watermark->alignment());
     }
 }
 
 void QTextDocumentPagedPrinter::printPageContents(int pageNr, int pageCount, QPainter *painter,
-                                                  const QTextDocument *doc, const QRectF &body)
+                                                  const QTextDocument *doc, const QRectF &body,
+                                                  QRectF &docPageRect)
 {
     Q_UNUSED(pageCount)
 
@@ -621,6 +611,7 @@ void QTextDocumentPagedPrinter::printPageContents(int pageNr, int pageCount, QPa
 
     painter->translate(body.left(), body.top() - (pageNr - 1) * body.height());
     const QRectF pageRect(0, (pageNr - 1) * body.height(), body.width(), body.height());
+    docPageRect = pageRect;
 
     QAbstractTextDocumentLayout *layout = doc->documentLayout();
     QAbstractTextDocumentLayout::PaintContext ctx;
@@ -636,7 +627,8 @@ void QTextDocumentPagedPrinter::printPageContents(int pageNr, int pageCount, QPa
 void QTextDocumentPagedPrinter::printHeaderFooterWatermark(int pageNr, int pageCount,
                                                            QPainter *painter,
                                                            const QTextDocument *doc,
-                                                           const QRectF &body)
+                                                           const QRectF &body,
+                                                           const QRectF &docPageRect)
 {
     Q_UNUSED(doc)
     Q_UNUSED(body)
@@ -646,9 +638,20 @@ void QTextDocumentPagedPrinter::printHeaderFooterWatermark(int pageNr, int pageC
     m_watermark->paint(painter, QRectF(m_headerRect.bottomLeft(), m_footerRect.topRight()), pageNr,
                        pageCount);
 
+    if (m_sideBar) {
+        const QRectF rightSideRect(m_headerRect.bottomRight(),
+                                   QPointF(body.right(), m_footerRect.top()));
+        m_sideBar->paint(painter, QTextDocumentPageSideBarInterface::RightSide, rightSideRect, docPageRect);
+
+        const QRectF leftSideRect(QPointF(body.left(), m_headerRect.bottom()),
+                                  m_footerRect.topLeft());
+        m_sideBar->paint(painter, QTextDocumentPageSideBarInterface::LeftSide, leftSideRect, docPageRect);
+    }
+
 #if 0
     painter->setPen(Qt::black);
-    painter->drawLine(QLineF(body.left(), m_headerRect.bottom(), body.right(), m_headerRect.bottom()));
+    painter->drawLine(
+            QLineF(body.left(), m_headerRect.bottom(), body.right(), m_headerRect.bottom()));
     painter->drawLine(QLineF(body.left(), m_footerRect.top(), body.right(), m_footerRect.top()));
 #endif
 }

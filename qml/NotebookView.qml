@@ -13,13 +13,15 @@
 
 import QtQml 2.15
 import QtQuick 2.15
-import Qt.labs.settings 1.0
 import QtQuick.Dialogs 1.3
+import QtQuick.Layouts 1.15
+import Qt.labs.settings 1.0
 import QtQuick.Controls 2.15
 import QtQuick.Controls.Material 2.15
 import QtQuick.Controls 1.4 as OldControls
 
 import io.scrite.components 1.0
+import "../js/utils.js" as Utils
 
 Rectangle {
     id: notebookView
@@ -100,7 +102,7 @@ Rectangle {
             notebookModel.preferredItem = element.elementType === ScreenplayElement.BreakElementType ? element : element.scene.notes
         }
         function onCurrentElementIndexChanged(val) {
-            if(workspaceSettings.syncCurrentSceneOnNotebook)
+            if(workspaceSettings.syncCurrentSceneOnNotebook && !notebookTree.activatingScreenplayElement)
                 notebookTree.activateFromCurrentScreenplayElement()
         }
     }
@@ -435,6 +437,8 @@ Rectangle {
                                         return "../icons/content/note.png"
                                     case Note.FormNoteType:
                                         return "../icons/content/form.png"
+                                    case Note.CheckListNoteType:
+                                        return "../icons/content/checklist.png"
                                     default:
                                         break
                                     }
@@ -498,7 +502,11 @@ Rectangle {
                 }
             }
 
+            property bool activatingScreenplayElement: false
             function activateScreenplayElement(_modelData) {
+                activatingScreenplayElement = true
+                Qt.callLater( () => { notebookTree.activatingScreenplayElement = false })
+
                 var makeSceneCurrent = function(notes) {
                     if(notes.ownerType === Notes.SceneOwner) {
                         var scene = notes.owner
@@ -676,6 +684,8 @@ Rectangle {
                             return textNoteComponent
                         case Note.FormNoteType:
                             return formNoteComponent
+                        case Note.CheckListNoteType:
+                            return checkListNoteComponent
                         }
                         break
                     case NotebookModel.EpisodeBreakType:
@@ -1105,10 +1115,10 @@ Rectangle {
                                         id: sceneSynopsisField
                                         anchors.fill: parent
                                         anchors.rightMargin: sceneSynopsisVScrollBar.visible ? sceneSynopsisVScrollBar.width : 0
-                                        text: scene.title
+                                        text: scene.synopsis
                                         placeholderText: "Scene Synopsis"
                                         readOnly: Scrite.document.readOnly
-                                        onTextChanged: scene.title = text
+                                        onTextChanged: scene.synopsis = text
                                         undoRedoEnabled: true
                                         backTabItem: sceneTitleField
                                         adjustTextWidthBasedOnScrollBar: false
@@ -1181,8 +1191,8 @@ Rectangle {
                                 showBusyIndicator = false
                             }
                         }
-                        Component.onCompleted: Scrite.app.execLater(sceneTabContentArea, 100, prepare)
-                        onVisibleChanged: Scrite.app.execLater(sceneTabContentArea, 100, prepare)
+                        Component.onCompleted: Utils.execLater(sceneTabContentArea, 100, prepare)
+                        onVisibleChanged: Utils.execLater(sceneTabContentArea, 100, prepare)
 
                         property bool pdfExportPossible: !graphIsEmpty && visible
                         onPdfExportPossibleChanged: Announcement.shout("4D37E093-1F58-4978-8060-CD6B9AD4E03C", pdfExportPossible ? 1 : -1)
@@ -1494,6 +1504,57 @@ Rectangle {
             FormView {
                 anchors.fill: parent
                 note: parent.note
+            }
+        }
+    }
+
+    Component {
+        id: checkListNoteComponent
+
+        Rectangle {
+            id: checkListNoteItem
+            property var componentData
+            property Note note: componentData.notebookItemObject
+            color: Qt.tint(note.color, "#E7FFFFFF")
+
+            // Report support
+            property bool hasReport: true
+            property string reportDescription: "Export this checklist as a PDF or ODT."
+            function createReportGenerator() {
+                checkListView.commitPendingItems()
+
+                var generator = Scrite.document.createReportGenerator("Notebook Report")
+                generator.section = note
+                return generator
+            }
+
+            function deleteSelf() {
+                var notes = note.notes
+                notes.removeNote(note)
+                switchTo(notes)
+            }
+
+            CheckListView {
+                id: checkListView
+                note: checkListNoteItem.note
+                anchors.top: parent.top
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.bottom: checkListAttachments.top
+            }
+
+            AttachmentsView {
+                id: checkListAttachments
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.bottom: parent.bottom
+                attachments: checkListNoteItem.note ? checkListNoteItem.note.attachments : null
+            }
+
+            AttachmentsDropArea2 {
+                id: checkListAttachmentsDropArea
+                anchors.fill: parent
+                target: checkListNoteItem.note ? checkListNoteItem.note.attachments : null
             }
         }
     }
@@ -1870,25 +1931,71 @@ Rectangle {
                     }
 
                     Item {
+                        id: loglineForm
                         anchors.fill: parent
                         anchors.leftMargin: 10
                         anchors.rightMargin: 10
 
-                        FlickableTextArea {
-                            id: loglineFieldArea
-                            text: Scrite.document.screenplay.logline
-                            onTextChanged: Scrite.document.screenplay.logline = text
-                            placeholderText: "Logline: a one-sentence summary or description."
-                            width: parent.width >= maxTextAreaSize+20 ? maxTextAreaSize : parent.width-20
-                            height: parent.height
-                            readOnly: Scrite.document.readOnly
-                            undoRedoEnabled: true
-                            ScrollBar.vertical: loglineVScrollBar
-                            adjustTextWidthBasedOnScrollBar: false
-                            anchors.horizontalCenter: parent.horizontalCenter
-                            background: Rectangle {
-                                color: primaryColors.windowColor
-                                opacity: 0.15
+                        TextLimiterSyntaxHighlighterDelegate {
+                            id: textLimitHighlighter
+                            textLimiter: TextLimiter {
+                                id: textLimiter
+                                maxWordCount: 50
+                                maxLetterCount: 240
+                                countMode: TextLimiter.CountInText
+                            }
+                        }
+
+                        Column {
+                            spacing: 0
+                            x: Math.max(0, (parent.width-width)/2)
+                            width: Math.min(idealAppFontMetrics.averageCharacterWidth*50, parent.width-20)
+
+                            Label {
+                                width: parent.width
+                                wrapMode: Text.WordWrap
+                                font.pointSize: Scrite.app.idealFontPointSize
+                                topPadding: 20
+                                bottomPadding: 10
+                                text: "A logline should swiftly convey what a screenplay is about, including the main character, central conflict, setup and antagonist."
+                            }
+
+                            Link {
+                                width: parent.width
+                                elide: Text.ElideMiddle
+                                text: "https://online.pointpark.edu/screenwriting/loglines/"
+                                onClicked: Qt.openUrlExternally(text)
+                                bottomPadding: 20
+                            }
+
+                            FlickableTextArea {
+                                id: loglineFieldArea
+                                text: Scrite.document.screenplay.logline
+                                onTextChanged: Scrite.document.screenplay.logline = text
+                                placeholderText: "Type your logline here."
+                                font.family: Scrite.document.displayFormat.defaultFont2.family
+                                font.pointSize: Scrite.app.idealFontPointSize + 2
+                                width: parent.width
+                                height: Math.max(idealAppFontMetrics.lineSpacing*10, contentHeight+10)
+                                readOnly: Scrite.document.readOnly
+                                undoRedoEnabled: true
+                                ScrollBar.vertical: loglineVScrollBar
+                                adjustTextWidthBasedOnScrollBar: false
+                                background: Rectangle {
+                                    color: primaryColors.windowColor
+                                    opacity: 0.15
+                                }
+                                Component.onCompleted: syntaxHighlighter.addDelegate(textLimitHighlighter)
+                            }
+
+                            Label {
+                                width: parent.width
+                                wrapMode: Text.WordWrap
+                                font.pointSize: Scrite.app.idealFontPointSize
+                                topPadding: 5
+                                text: (textLimiter.limitReached ? "WARNING: " : "") + "Words: " + textLimiter.wordCount + "/" + textLimiter.maxWordCount +
+                                    ", Letters: " + textLimiter.letterCount + "/" + textLimiter.maxLetterCount
+                                color: textLimiter.limitReached ? "darkred" : primaryColors.a700.background
                             }
                         }
                     }
@@ -2184,8 +2291,8 @@ Rectangle {
                                 showBusyIndicator = false
                             }
                         }
-                        Component.onCompleted: Scrite.app.execLater(charactersTabContentArea, 100, prepare)
-                        onVisibleChanged: Scrite.app.execLater(charactersTabContentArea, 100, prepare)
+                        Component.onCompleted: Utils.execLater(charactersTabContentArea, 100, prepare)
+                        onVisibleChanged: Utils.execLater(charactersTabContentArea, 100, prepare)
 
                         property bool pdfExportPossible: !graphIsEmpty && visible
                         onPdfExportPossibleChanged: Announcement.shout("4D37E093-1F58-4978-8060-CD6B9AD4E03C", pdfExportPossible ? 1 : -1)
@@ -2299,12 +2406,12 @@ Rectangle {
                                 Connections {
                                     target: characterNotes
                                     function onCharacterChanged() {
-                                        Scrite.app.execLater(this, 100, function() {
+                                        Utils.execLater(this, 100, function() {
                                             photoSlides.currentIndex = character.hasKeyPhoto ? character.keyPhotoIndex : 0
                                         } )
                                     }
                                 }
-                                Component.onCompleted: Scrite.app.execLater(this, 100, function() {
+                                Component.onCompleted: Utils.execLater(this, 100, function() {
                                     photoSlides.currentIndex = character.hasKeyPhoto ? character.keyPhotoIndex : 0
                                 } )
 
@@ -2803,8 +2910,8 @@ Rectangle {
                                 showBusyIndicator = false
                             }
                         }
-                        Component.onCompleted: Scrite.app.execLater(characterTabContentArea, 100, prepare)
-                        onVisibleChanged: Scrite.app.execLater(characterTabContentArea, 100, prepare)
+                        Component.onCompleted: Utils.execLater(characterTabContentArea, 100, prepare)
+                        onVisibleChanged: Utils.execLater(characterTabContentArea, 100, prepare)
                     }
 
                     DisabledFeatureNotice {
@@ -2948,6 +3055,10 @@ Rectangle {
                                         TabSequenceItem.manager: characterListTabManager
                                         TabSequenceItem.sequence: index
                                         maximumLength: 50
+                                        onActiveFocusChanged: {
+                                            if(activeFocus)
+                                                charactersListScroll.ensureItemVisible(characterRowItem)
+                                        }
                                     }
 
                                     Text {
@@ -3039,28 +3150,43 @@ Rectangle {
 
         ColorMenu {
             title: "Text Note"
-            onMenuItemClicked: {
-                var note = newNoteMenu.notes.addTextNote()
-                if(note) {
-                    note.color = color
-                    note.objectName = "_newNote"
-                    Scrite.app.execLater(note, 10, function() {
-                        switchTo(note);
-                    })
-                }
-                newNoteMenu.close()
-            }
+            onMenuItemClicked: (color) => {
+                                   var note = newNoteMenu.notes.addTextNote()
+                                   if(note) {
+                                       note.color = color
+                                       note.objectName = "_newNote"
+                                       Utils.execLater(note, 10, function() {
+                                           switchTo(note);
+                                       })
+                                   }
+                                   newNoteMenu.close()
+                               }
         }
 
         FormMenu {
             title: "Form Note"
             notes: newNoteMenu.notes
-            onNoteAdded: {
-                Scrite.app.execLater(note, 10, function() {
-                    switchTo(note);
-                })
-                newNoteMenu.close()
-            }
+            onNoteAdded: (note) => {
+                             Utils.execLater(note, 10, function() {
+                                 switchTo(note);
+                             })
+                             newNoteMenu.close()
+                         }
+        }
+
+        ColorMenu {
+            title: "Checklist Note"
+            onMenuItemClicked: (color) => {
+                                   var note = newNoteMenu.notes.addCheckListNote()
+                                   if(note) {
+                                       note.color = color
+                                       note.objectName = "_newNote"
+                                       Utils.execLater(note, 10, function() {
+                                            switchTo(note)
+                                       })
+                                   }
+                                   newNoteMenu.close()
+                               }
         }
     }
 
@@ -3088,7 +3214,7 @@ Rectangle {
                     notebookContentLoader.confirmAndDelete()
                 else {
                     notebookView.switchTo(noteContextMenu.note)
-                    Scrite.app.execLater( notebookContentLoader, 500, () => {
+                    Utils.execLater( notebookContentLoader, 500, () => {
                                      notebookContentLoader.confirmAndDelete()
                                  } )
                 }
@@ -3133,7 +3259,7 @@ Rectangle {
                     notebookContentLoader.confirmAndDelete()
                 else {
                     notebookView.switchTo(characterContextMenu.character.notes)
-                    Scrite.app.execLater( notebookContentLoader, 100, () => {
+                    Utils.execLater( notebookContentLoader, 100, () => {
                                      notebookContentLoader.confirmAndDelete()
                                  } )
                 }

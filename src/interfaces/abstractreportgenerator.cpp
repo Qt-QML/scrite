@@ -53,7 +53,8 @@ void AbstractReportGenerator::setFormat(AbstractReportGenerator::Format val)
         const QString suffix =
                 m_format == AdobePDF ? QStringLiteral(".pdf") : QStringLiteral(".odt");
         const QFileInfo fileInfo(this->fileName());
-        this->setFileName(fileInfo.absoluteDir().absoluteFilePath(fileInfo.baseName() + suffix));
+        this->setFileName(
+                fileInfo.absoluteDir().absoluteFilePath(fileInfo.completeBaseName() + suffix));
     }
 }
 
@@ -297,21 +298,9 @@ QJsonObject AbstractReportGenerator::configurationFormInfo() const
     return formInfo;
 }
 
-QString AbstractReportGenerator::polishFileName(const QString &fileName) const
+QString AbstractReportGenerator::fileNameExtension() const
 {
-    QFileInfo fi(fileName);
-    switch (m_format) {
-    case AdobePDF:
-        if (fi.suffix().toLower() != "pdf")
-            return fileName + ".pdf";
-        break;
-    case OpenDocumentFormat:
-        if (fi.suffix().toLower() != "odt")
-            return fileName + ".odt";
-        break;
-    }
-
-    return fileName;
+    return m_format == AdobePDF ? QStringLiteral("pdf") : QStringLiteral("odt");
 }
 
 bool AbstractReportGenerator::usePdfWriter() const

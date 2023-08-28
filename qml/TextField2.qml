@@ -19,11 +19,14 @@ import io.scrite.components 1.0
 
 TextField {
     id: textField
+    property alias completionAcceptsEnglishStringsOnly: completionModel.acceptEnglishStringsOnly
+    property alias completionSortMode: completionModel.sortMode
     property alias completionStrings: completionModel.strings
     property alias completionPrefix: completionModel.completionPrefix
     property alias maxCompletionItems: completionModel.maxVisibleItems
     property int maxVisibleItems: maxCompletionItems
     property int minimumCompletionPrefixLength: 1
+    property bool singleClickAutoComplete: true
     signal requestCompletion(string string)
 
     property Item tabItem
@@ -58,7 +61,7 @@ TextField {
     }
 
     onActiveFocusChanged: {
-        if(activeFocus)
+        if(activeFocus && !readOnly)
             selectAll()
         else
             completionViewPopup.close()
@@ -114,6 +117,14 @@ TextField {
     }
 
     Keys.onTabPressed: autoCompleteOrFocusNext(true)
+
+    ContextMenuEvent.onPopup: (mouse) => {
+        if(!textField.activeFocus) {
+            textField.forceActiveFocus()
+            textField.cursorPosition = textField.positionAt(mouse.x, mouse.y)
+        }
+        contextMenu.popup()
+    }
 
     function autoCompleteOrFocusNext(doTabItem) {
         if(completionModel.hasSuggestion && completionModel.suggestion !== text) {
@@ -192,10 +203,16 @@ TextField {
                 MouseArea {
                     id: textMouseArea
                     anchors.fill: parent
-                    hoverEnabled: true
-                    onContainsMouseChanged: completionModel.currentRow = index
-                    cursorShape: Qt.PointingHandCursor
-                    onClicked: completionModel.requestCompletion(parent.text)
+                    hoverEnabled: singleClickAutoComplete
+                    onContainsMouseChanged: if(singleClickAutoComplete) completionModel.currentRow = index
+                    cursorShape: singleClickAutoComplete ? Qt.PointingHandCursor : Qt.ArrowCursor
+                    onClicked: {
+                        if(singleClickAutoComplete || completionModel.currentRow === index)
+                            completionModel.requestCompletion(parent.text)
+                        else
+                            completionModel.currentRow = index
+                    }
+                    onDoubleClicked: completionModel.requestCompletion(parent.text)
                 }
             }
             highlight: Rectangle {
@@ -204,6 +221,37 @@ TextField {
             currentIndex: completionModel.currentRow
             height: Math.min(contentHeight, maxVisibleItems > 0 ? delegateHeight*maxVisibleItems : contentHeight)
             ScrollBar.vertical: ScrollBar2 { flickable: completionView }
+        }
+    }
+
+    Menu2 {
+        id: contextMenu
+        focus: false
+        property bool __persistentSelection: false
+        onAboutToShow: {
+            __persistentSelection = textField.persistentSelection
+            textField.persistentSelection = true
+        }
+        onAboutToHide: textField.persistentSelection = __persistentSelection
+
+        MenuItem2 {
+            text: "Cut\t" + Scrite.app.polishShortcutTextForDisplay("Ctrl+X")
+            enabled: textField.selectedText !== ""
+            onClicked: textField.cut()
+            focusPolicy: Qt.NoFocus
+        }
+
+        MenuItem2 {
+            text: "Copy\t" + Scrite.app.polishShortcutTextForDisplay("Ctrl+C")
+            enabled: textField.selectedText !== ""
+            onClicked: textField.copy()
+            focusPolicy: Qt.NoFocus
+        }
+
+        MenuItem2 {
+            text: "Paste\t" + Scrite.app.polishShortcutTextForDisplay("Ctrl+V")
+            onClicked: textField.paste()
+            focusPolicy: Qt.NoFocus
         }
     }
 

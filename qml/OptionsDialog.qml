@@ -15,10 +15,11 @@ import QtQml 2.15
 import QtQuick 2.15
 import QtQuick.Dialogs 1.3
 import Qt.labs.settings 1.0
+import QtQuick.Layouts 1.15
 import QtQuick.Controls 2.15
 import QtQuick.Controls.Material 2.15
-
 import io.scrite.components 1.0
+import "../js/utils.js" as Utils
 
 Item {
     id: optionsDialog
@@ -221,38 +222,73 @@ Item {
                         text: "Screenplay Editor"
                     }
 
-                    Grid {
-                        id: screenplayEditorSettingsGrid
-                        width: parent.width
+                    GridLayout {
+                        id: screenplayEditorSettingsLayout
+                        width: parent.width-20
                         columns: 2
                         anchors.centerIn: parent
+                        readonly property int _padding: 4
 
                         CheckBox2 {
                             checked: screenplayEditorSettings.enableSpellCheck
                             text: "Spell Check"
-                            width: parent.width/2
                             onToggled: screenplayEditorSettings.enableSpellCheck = checked
+                            padding: parent._padding
+                            Layout.preferredWidth: parent.width / parent.columns
                         }
 
                         CheckBox2 {
-                            checked: screenplayEditorSettings.displayRuler
-                            text: "Ruler"
-                            width: parent.width/2
-                            onToggled: screenplayEditorSettings.displayRuler = checked
+                            checked: screenplayEditorSettings.singleClickAutoComplete
+                            text: "Auto Complete on Single Click"
+                            onToggled: screenplayEditorSettings.singleClickAutoComplete = checked
+                            padding: parent._padding
+                            ToolTip.text: "If checked, single click on an option in auto-complete popup will apply it in the screenplay editor."
+                            ToolTip.visible: hovered
+                            Layout.preferredWidth: parent.width / parent.columns
                         }
 
                         CheckBox2 {
-                            checked: screenplayEditorSettings.showLoglineEditor
-                            text: "Logline Editor"
-                            width: parent.width/2
-                            onToggled: screenplayEditorSettings.showLoglineEditor = checked
+                            checked: screenplayEditorSettings.enableAutoCapitalizeSentences
+                            text: "Capitalize Sentences"
+                            ToolTip.text: "If checked, it automatically capitalizes first letter of every sentence while typing."
+                            ToolTip.visible: hovered
+                            hoverEnabled: true
+                            onToggled: screenplayEditorSettings.enableAutoCapitalizeSentences = checked
+                            padding: parent._padding
+                            Layout.preferredWidth: parent.width / parent.columns
                         }
 
                         CheckBox2 {
-                            checked: screenplayEditorSettings.spaceBetweenScenes > 0
-                            text: "Scene Blocks"
-                            width: parent.width/2
-                            onToggled: screenplayEditorSettings.spaceBetweenScenes = checked ? 40 : 0
+                            checked: screenplayEditorSettings.enableAutoPolishParagraphs
+                            text: "Add/Remove CONT'D"
+                            ToolTip.text: "If checked, CONT'D will be automatically added/removed appropriately."
+                            ToolTip.visible: hovered
+                            hoverEnabled: true
+                            onToggled: screenplayEditorSettings.enableAutoPolishParagraphs = checked
+                            padding: parent._padding
+                            Layout.preferredWidth: parent.width / parent.columns
+                        }
+
+                        CheckBox2 {
+                            checked: screenplayEditorSettings.autoAdjustEditorWidthInScreenplayEditor
+                            text: "Auto Adjust Editor Width"
+                            ToolTip.text: "If checked, the editor width is automatically adjusted when you first launch Scrite or switch back to the screenplay tab."
+                            ToolTip.visible: hovered
+                            hoverEnabled: true
+                            onToggled: screenplayEditorSettings.autoAdjustEditorWidthInScreenplayEditor = checked
+                            padding: parent._padding
+                            Layout.preferredWidth: parent.width / parent.columns
+                        }
+
+                        CheckBox2 {
+                            checked: screenplayEditorSettings.optimiseScrolling
+                            text: "Smooth Scrolling"
+                            ToolTip.visible: hovered
+                            ToolTip.text: "Checking this option will make scrolling in screenplay editor smooth, but uses a lot of RAM and can cause application to freeze at times while scrolling is being computed."
+                            hoverEnabled: true
+                            onToggled: screenplayEditorSettings.optimiseScrolling = checked
+                            padding: parent._padding
+                            Layout.preferredWidth: parent.width / parent.columns
                         }
                     }
                 }
@@ -777,7 +813,7 @@ Item {
                 }
 
                 GroupBox {
-                    label: Text { text: "Page Layout (Display)" }
+                    label: Text { text: "Display" }
                     width: (parent.width - parent.spacing)/2
                     clip: true
 
@@ -1049,29 +1085,7 @@ Item {
         Item {
             property real labelWidth: 60
             property var fieldsModel: Scrite.app.enumerationModelForType("HeaderFooter", "Field")
-
-            Settings {
-                id: pageSetupSettings
-                fileName: Scrite.app.settingsFilePath
-                category: "PageSetup"
-                property var paperSize: ScreenplayPageLayout.Letter
-                property var headerLeft: HeaderFooter.Title
-                property var headerCenter: HeaderFooter.Subtitle
-                property var headerRight: HeaderFooter.PageNumber
-                property real headerOpacity: 0.5
-                property var footerLeft: HeaderFooter.Author
-                property var footerCenter: HeaderFooter.Version
-                property var footerRight: HeaderFooter.Contact
-                property real footerOpacity: 0.5
-                property bool watermarkEnabled: false
-                property string watermarkText: "Scrite"
-                property string watermarkFont: "Courier Prime"
-                property int watermarkFontSize: 120
-                property color watermarkColor: "lightgray"
-                property real watermarkOpacity: 0.5
-                property real watermarkRotation: -45
-                property int watermarkAlignment: Qt.AlignCenter
-            }
+            property PageSetup pageSetupSettings: Scrite.document.pageSetup
 
             Column {
                 width: parent.width - 60
@@ -1297,11 +1311,14 @@ Item {
 
                 GroupBox {
                     width: parent.width
+                    height: watermarkSettingsLayout.height + 40
                     label: Text { text: "Watermark" }
 
                     Row {
+                        id: watermarkSettingsLayout
                         spacing: 30
                         anchors.horizontalCenter: parent.horizontalCenter
+                        enabled: watermarkFeature.enabled
 
                         Grid {
                             columns: 2
@@ -1316,7 +1333,7 @@ Item {
 
                             CheckBox2 {
                                 text: checked ? "ON" : "OFF"
-                                checked: pageSetupSettings.watermarkEnabled
+                                checked: watermarkFeature.enabled ? pageSetupSettings.watermarkEnabled : true
                                 onToggled: pageSetupSettings.watermarkEnabled = checked
                             }
 
@@ -1328,7 +1345,7 @@ Item {
 
                             TextField2 {
                                 width: 300
-                                text: pageSetupSettings.watermarkText
+                                text: watermarkFeature.enabled ? pageSetupSettings.watermarkText : "Scrite"
                                 onTextEdited: pageSetupSettings.watermarkText = text
                                 enabled: pageSetupSettings.watermarkEnabled
                                 enableTransliteration: true
@@ -1412,26 +1429,35 @@ Item {
                             }
                         }
                     }
+
+                    DisabledFeatureNotice {
+                        anchors.fill: parent
+                        visible: !watermarkFeature.enabled
+                        color: Qt.rgba(1,1,1,0.9)
+                        featureName: "Watermark Settings"
+                    }
                 }
 
-                Button2 {
+                Row {
                     anchors.horizontalCenter: parent.horizontalCenter
-                    text: "Restore Defaults"
-                    onClicked: {
-                        pageSetupSettings.headerLeft = HeaderFooter.Title
-                        pageSetupSettings.headerCenter = HeaderFooter.Subtitle
-                        pageSetupSettings.headerRight = HeaderFooter.PageNumber
-                        pageSetupSettings.footerLeft = HeaderFooter.Author
-                        pageSetupSettings.footerCenter = HeaderFooter.Version
-                        pageSetupSettings.footerRight = HeaderFooter.Contact
-                        pageSetupSettings.watermarkEnabled = false
-                        pageSetupSettings.watermarkText = "Scrite"
-                        pageSetupSettings.watermarkFont = "Courier Prime"
-                        pageSetupSettings.watermarkFontSize = 120
-                        pageSetupSettings.watermarkColor = "lightgray"
-                        pageSetupSettings.watermarkOpacity = 0.5
-                        pageSetupSettings.watermarkRotation = -45
-                        pageSetupSettings.watermarkAlignment = Qt.AlignCenter
+                    spacing: 20
+
+                    Button2 {
+                        text: "Save As Default"
+                        onClicked: pageSetupSettings.saveAsDefaults()
+                        enabled: !pageSetupSettings.usingSavedDefaults
+                    }
+
+                    Button2 {
+                        text: "Use Saved Defaults"
+                        onClicked: pageSetupSettings.useSavedDefaults()
+                        enabled: !pageSetupSettings.usingSavedDefaults
+                    }
+
+                    Button2 {
+                        text: "Use Factory Defaults"
+                        onClicked: pageSetupSettings.useFactoryDefaults()
+                        enabled: !pageSetupSettings.usingFactoryDefaults
                     }
                 }
             }
@@ -1455,6 +1481,7 @@ Item {
                 property string email
                 property string phone
                 property string website
+                property bool includeTimestamp: false
             }
 
             Column {
@@ -1476,32 +1503,36 @@ Item {
                     anchors.horizontalCenter: parent.horizontalCenter
 
                     Loader {
-                        anchors.fill: parent
-                        active: Scrite.document.screenplay.coverPagePhoto !== "" && (coverPagePhoto.paintedWidth < parent.width || coverPagePhoto.paintedHeight < parent.height)
-                        opacity: 0.1
-                        sourceComponent: Item {
-                            Image {
-                                id: coverPageImage
-                                anchors.fill: parent
-                                fillMode: Image.PreserveAspectCrop
-                                source: "file://" + Scrite.document.screenplay.coverPagePhoto
-                                asynchronous: true
-                            }
-                        }
-                    }
-
-                    Image {
-                        id: coverPagePhoto
+                        id: coverPagePhotoLoader
                         anchors.fill: parent
                         anchors.margins: 1
-                        smooth: true; mipmap: true
-                        fillMode: Image.PreserveAspectFit
-                        source: Scrite.document.screenplay.coverPagePhoto !== "" ? "file:///" + Scrite.document.screenplay.coverPagePhoto : ""
-                        opacity: coverPagePhotoMouseArea.containsMouse ? 0.25 : 1
+                        active: Scrite.document.screenplay.coverPagePhoto !== ""
+                        sourceComponent: Item {
+                            Image {
+                                anchors.fill: parent
+                                fillMode: Image.PreserveAspectCrop
+                                asynchronous: true
+                                source: "file://" + Scrite.document.screenplay.coverPagePhoto
+                                visible: coverPagePhoto.status === Image.Ready && (coverPagePhoto.paintedWidth < width || coverPagePhoto.paintedHeight < height)
+                                opacity: 0.1
+                                cache: false
+                            }
 
-                        BusyIcon {
-                            anchors.centerIn: parent
-                            running: parent.status === Image.Loading
+                            Image {
+                                id: coverPagePhoto
+                                anchors.fill: parent
+                                smooth: true; mipmap: true
+                                asynchronous: true
+                                fillMode: Image.PreserveAspectFit
+                                source: "file:///" + Scrite.document.screenplay.coverPagePhoto
+                                opacity: coverPagePhotoMouseArea.containsMouse ? 0.25 : 1
+                                cache: false
+
+                                BusyIcon {
+                                    anchors.centerIn: parent
+                                    running: parent.status === Image.Loading
+                                }
+                            }
                         }
                     }
 
@@ -1898,9 +1929,9 @@ Item {
                     }
 
                     CheckBox2 {
-                        text: "Center Align Title Page"
-                        checked: Scrite.document.screenplay.titlePageIsCentered
-                        onToggled: Scrite.document.screenplay.titlePageIsCentered = checked
+                        text: "Include Timestamp"
+                        checked: titlePageSettings.includeTimestamp
+                        onToggled: titlePageSettings.includeTimestamp = checked
                     }
                 }
 
@@ -1932,7 +1963,7 @@ Item {
                 opacity: 0
                 onOpacityChanged: {
                     if(opacity > 0)
-                        Scrite.app.execLater(defaultsSavedNotice, 2500, function() { defaultsSavedNotice.opacity = 0 })
+                        Utils.execLater(defaultsSavedNotice, 2500, function() { defaultsSavedNotice.opacity = 0 })
                 }
             }
         }

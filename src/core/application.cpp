@@ -39,9 +39,11 @@
 #include <QMetaEnum>
 #include <QQuickItem>
 #include <QJsonArray>
+#include <QQmlEngine>
 #include <QQuickStyle>
 #include <QMessageBox>
 #include <QJsonObject>
+#include <QQmlContext>
 #include <QColorDialog>
 #include <QQuickWindow>
 #include <QElapsedTimer>
@@ -234,7 +236,7 @@ static void copyFilesRecursively(const QDir &from, const QDir &to)
 
 QVersionNumber Application::prepare()
 {
-    const QVersionNumber applicationVersion = QVersionNumber::fromString(QStringLiteral("0.9.2.8"));
+    const QVersionNumber applicationVersion = QVersionNumber::fromString(QStringLiteral("0.9.4.2"));
     const QString applicationVersionString = [applicationVersion]() -> QString {
         const QVector<int> segments = applicationVersion.segments();
 
@@ -732,7 +734,7 @@ QJsonObject Application::fileInfo(const QString &path) const
     if (!fi.exists())
         return ret;
 
-    ret.insert("baseName", fi.baseName());
+    ret.insert("baseName", fi.completeBaseName());
     ret.insert("absoluteFilePath", fi.absoluteFilePath());
     ret.insert("absolutePath", fi.absolutePath());
     ret.insert("suffix", fi.suffix());
@@ -765,56 +767,6 @@ bool Application::isMouseOverItem(QQuickItem *item) const
 
     const QPointF pos = this->mapGlobalPositionToItem(item, QCursor::pos());
     return item->boundingRect().contains(pos);
-}
-
-class ExecLater : public QObject
-{
-public:
-    explicit ExecLater(int howMuchLater, const QJSValue &function, const QJSValueList &arg,
-                       QObject *parent = nullptr);
-    ~ExecLater();
-
-    void timerEvent(QTimerEvent *event);
-
-private:
-    ExecLaterTimer m_timer;
-    QJSValue m_function;
-    QJSValueList m_arguments;
-};
-
-ExecLater::ExecLater(int howMuchLater, const QJSValue &function, const QJSValueList &args,
-                     QObject *parent)
-    : QObject(parent), m_timer("ExecLater.m_timer"), m_function(function), m_arguments(args)
-{
-    howMuchLater = qBound(0, howMuchLater, 60 * 60 * 1000);
-    m_timer.start(howMuchLater, this);
-}
-
-ExecLater::~ExecLater()
-{
-    m_timer.stop();
-}
-
-void ExecLater::timerEvent(QTimerEvent *event)
-{
-    if (m_timer.timerId() == event->timerId()) {
-        m_timer.stop();
-        if (m_function.isCallable())
-            m_function.call(m_arguments);
-        GarbageCollector::instance()->add(this);
-    }
-}
-
-void Application::execLater(QObject *context, int howMuchLater, const QJSValue &function,
-                            const QJSValueList &args)
-{
-    QObject *parent = context ? context : this;
-
-#ifndef QT_NO_DEBUG_OUTPUT
-    qDebug() << "Registering Exec Later for " << context << " after " << howMuchLater;
-#endif
-
-    new ExecLater(howMuchLater, function, args, parent);
 }
 
 QColor Application::translucent(const QColor &input, qreal alpha)
@@ -894,7 +846,7 @@ QJsonObject Application::objectConfigurationFormInfo(const QObject *object,
 
     for (int i = from->propertyOffset(); i < mo->propertyCount(); i++) {
         const QMetaProperty prop = mo->property(i);
-        if (!prop.isWritable() || !prop.isStored())
+        if (!prop.isWritable() || !prop.isStored() || !prop.isDesignable())
             continue;
 
         QJsonObject field;
@@ -1210,29 +1162,31 @@ QString Application::replaceCharacterName(const QString &from, const QString &to
     return in;
 }
 
-QString Application::sanitiseFileName(const QString &fileName)
+QString Application::sanitiseFileName(const QString &fileName, QSet<QChar> *removedChars)
 {
     const QFileInfo fi(fileName);
 
-    QString baseName = fi.baseName();
+    QString completeBaseName = fi.completeBaseName();
     bool changed = false;
-    for (int i = baseName.length() - 1; i >= 0; i--) {
-        const QChar ch = baseName.at(i);
+    for (int i = completeBaseName.length() - 1; i >= 0; i--) {
+        const QChar ch = completeBaseName.at(i);
         if (ch.isLetterOrNumber())
             continue;
 
-        static const QList<QChar> allowedChars = {
-            '-', '_', '[', ']', '(', ')', '{', '}', '&', ' '
-        };
+        static const QList<QChar> allowedChars = { '-', '_', '[', ']', '(', ')',
+                                                   '{', '}', '&', ' ', '.' };
         if (allowedChars.contains(ch))
             continue;
 
-        baseName = baseName.remove(i, 1);
+        if (removedChars)
+            *removedChars += ch;
+
+        completeBaseName = completeBaseName.remove(i, 1);
         changed = true;
     }
 
     if (changed)
-        return fi.absoluteDir().absoluteFilePath(baseName + QStringLiteral(".")
+        return fi.absoluteDir().absoluteFilePath(completeBaseName + QStringLiteral(".")
                                                  + fi.suffix().toLower());
 
     return fileName;
@@ -1471,7 +1425,7 @@ QString Application::copyFile(const QString &fromFilePath, const QString &toFold
         if (QFile::exists(toFilePath)) {
             const QFileInfo toFileInfo(toFilePath);
             toFilePath = toFileInfo.absoluteDir().absoluteFilePath(
-                    toFileInfo.baseName() + QStringLiteral(" ") + QString::number(counter++)
+                    toFileInfo.completeBaseName() + QStringLiteral(" ") + QString::number(counter++)
                     + QStringLiteral(".") + toFileInfo.suffix());
         } else
             break;
@@ -1508,7 +1462,7 @@ QString Application::fileContents(const QString &fileName)
 
 QString Application::fileName(const QString &path)
 {
-    return QFileInfo(path).baseName();
+    return QFileInfo(path).completeBaseName();
 }
 
 QString Application::filePath(const QString &fileName)
@@ -1664,8 +1618,7 @@ bool Application::restoreWindowGeometry(QWindow *window, const QString &group)
             m_settings->value(group + QStringLiteral("/windowGeometry")).toString();
     if (geometryString == QStringLiteral("Maximized")) {
 #ifdef Q_OS_WIN
-        ExecLaterTimer::call(
-                "window.showMaximized", window, [=]() { window->showMaximized(); }, 100);
+        QTimer::singleShot(100, window, &QWindow::showMaximized);
 #else
         window->setGeometry(screenGeo);
 #endif

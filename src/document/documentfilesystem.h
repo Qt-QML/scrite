@@ -34,11 +34,13 @@ public:
     explicit DocumentFileSystem(QObject *parent = nullptr);
     ~DocumentFileSystem();
 
-    enum Format { UnknownFormat, ScriteFormat, ZipFormat };
+    void hardReset();
 
-    void reset();
+    enum Format { UnknownFormat, ScriteFormat, ZipFormat };
     bool load(const QString &fileName, Format *format = nullptr);
-    bool save(const QString &fileName, bool encrypt = false);
+
+    enum SaveMode { BlockingSaveMode, NonBlockingSaveMode };
+    bool save(const QString &fileName, bool encrypt = false, SaveMode mode = BlockingSaveMode);
 
     void setHeader(const QByteArray &header);
     QByteArray header() const;
@@ -67,12 +69,18 @@ public:
                      bool replaceIfExists = true);
 
     // API to cleanup unreferenced files that may be lying around.
-    void cleanup();
     Q_SIGNAL void auction(const QString &path, int *claims);
 
+signals:
+    void saveStarted();
+    void saveFinished(bool success);
+
 private:
+    void reset();
+    void cleanup();
     bool pack(QDataStream &ds);
     bool unpack(QDataStream &ds);
+    void saveTaskFinished();
 
 private:
     friend class DocumentFile;

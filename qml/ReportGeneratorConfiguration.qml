@@ -11,14 +11,14 @@
 **
 ****************************************************************************/
 
-import io.scrite.components 1.0
-
 import QtQml 2.15
 import QtQuick 2.15
 import QtQuick.Window 2.15
 import QtQuick.Layouts 1.15
 import QtQuick.Controls 2.15
 import QtQuick.Controls.Material 2.15
+import io.scrite.components 1.0
+import "../js/utils.js" as Utils
 
 Item {
     id: configurationBox
@@ -52,8 +52,14 @@ Item {
             }
         }
 
-        if(generator !== null)
+        if(generator !== null) {
             formInfo = generator.configurationFormInfo()
+
+            if(Scrite.app.verifyType(generator, "AbstractScreenplaySubsetReport")) {
+                generator.capitalizeSentences = screenplayEditorSettings.enableAutoCapitalizeSentences
+                generator.polishParagraphs = screenplayEditorSettings.enableAutoPolishParagraphs
+            }
+        }
 
         modalDialog.arguments = undefined
     }
@@ -189,6 +195,7 @@ Item {
                                         width: parent.width-20
                                         label: "Select a file to export into"
                                         absoluteFilePath: generator.fileName
+                                        enabled: reportSaveFeature.enabled
                                         allowedExtensions: [
                                             {
                                                 "label": "Adobe PDF Format",
@@ -329,9 +336,14 @@ Item {
                     id: fileManager
                 }
 
+                AppFeature {
+                    id: reportSaveFeature
+                    featureName: generator ? "report/" + generator.title.toLowerCase() + "/save" : "report"
+                }
+
                 onVisibleChanged: {
                     if(visible) {
-                        Scrite.app.execLater(busyOverlay, 100, function() {
+                        Utils.execLater(busyOverlay, 100, function() {
                             const dlFileName = generator.fileName
                             if(generator.format === AbstractReportGenerator.AdobePDF)
                                 generator.fileName = fileManager.generateUniqueTemporaryFileName("pdf")
@@ -339,7 +351,7 @@ Item {
                             if(generator.generate()) {
                                 if(generator.format === AbstractReportGenerator.AdobePDF) {
                                     const ppr = generator.singlePageReport ? 1 : 2
-                                    pdfViewer.show(generator.title, generator.fileName, dlFileName, ppr)
+                                    pdfViewer.show(generator.title, generator.fileName, dlFileName, ppr, reportSaveFeature.enabled)
                                 } else
                                     Scrite.app.revealFileOnDesktop(generator.fileName)
                                 modalDialog.close()

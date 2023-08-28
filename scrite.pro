@@ -81,8 +81,10 @@ HEADERS += \
     src/quick/items/simpletabbaritem.h \
     src/quick/items/textdocumentitem.h \
     src/quick/objects/announcement.h \
+    src/quick/objects/batchchange.h \
     src/quick/objects/colorimageprovider.h \
     src/quick/objects/completionmodel.h \
+    src/quick/objects/contextmenuevent.h \
     src/quick/objects/deltadocument.h \
     src/quick/objects/filemanager.h \
     src/quick/objects/flickscrollspeedcontrol.h \
@@ -90,6 +92,7 @@ HEADERS += \
     src/quick/objects/modelaggregator.h \
     src/quick/objects/propertyalias.h \
     src/quick/objects/refcounter.h \
+    src/quick/objects/syntaxhighlighter.h \
     src/quick/objects/tabsequencemanager.h \
     src/quick/objects/delayedpropertybinder.h \
     src/quick/objects/notification.h \
@@ -99,6 +102,7 @@ HEADERS += \
     src/quick/objects/polygontesselator.h \
     src/quick/objects/shortcutsmodel.h \
     src/quick/objects/textdocument.h \
+    src/quick/objects/textlimiter.h \
     src/quick/objects/trackobject.h \
     src/quick/objects/notificationmanager.h \
     src/quick/objects/materialcolors.h \
@@ -206,14 +210,18 @@ SOURCES += \
     src/quick/items/simpletabbaritem.cpp \
     src/quick/items/textdocumentitem.cpp \
     src/quick/objects/announcement.cpp \
+    src/quick/objects/batchchange.cpp \
     src/quick/objects/colorimageprovider.cpp \
     src/quick/objects/completionmodel.cpp \
+    src/quick/objects/contextmenuevent.cpp \
     src/quick/objects/deltadocument.cpp \
     src/quick/objects/filemanager.cpp \
     src/quick/objects/flickscrollspeedcontrol.cpp \
     src/quick/objects/itempositionmapper.cpp \
     src/quick/objects/modelaggregator.cpp \
     src/quick/objects/propertyalias.cpp \
+    src/quick/objects/refcounter.cpp \
+    src/quick/objects/syntaxhighlighter.cpp \
     src/quick/objects/tabsequencemanager.cpp \
     src/quick/objects/fileinfo.cpp \
     src/quick/objects/focustracker.cpp \
@@ -225,6 +233,7 @@ SOURCES += \
     src/quick/objects/aggregation.cpp \
     src/quick/objects/shortcutsmodel.cpp \
     src/quick/objects/textdocument.cpp \
+    src/quick/objects/textlimiter.cpp \
     src/quick/objects/trackobject.cpp \
     src/quick/objects/materialcolors.cpp \
     src/quick/objects/errorreport.cpp \

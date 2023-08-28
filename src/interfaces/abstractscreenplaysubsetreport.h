@@ -92,6 +92,14 @@ public:
     bool isGenerateTitlePage() const { return m_generateTitlePage; }
     Q_SIGNAL void generateTitlePageChanged();
 
+    Q_CLASSINFO("includeLogline_FieldGroup", "Options")
+    Q_CLASSINFO("includeLogline_FieldLabel", "Include logline in title page. (PDF Only)")
+    Q_CLASSINFO("includeLogline_FieldEditor", "CheckBox")
+    Q_PROPERTY(bool includeLogline READ isIncludeLogline WRITE setIncludeLogline NOTIFY includeLoglineChanged)
+    void setIncludeLogline(bool val);
+    bool isIncludeLogline() const { return m_includeLogline; }
+    Q_SIGNAL void includeLoglineChanged();
+
     Q_CLASSINFO("includeSceneIcons_FieldGroup", "Options")
     Q_CLASSINFO("includeSceneIcons_FieldLabel",
                 "Include scene icons in the generated PDF. (PDF Only)")
@@ -119,6 +127,20 @@ public:
     void setIncludeActBreaks(bool val);
     bool isIncludeActBreaks() const { return m_includeActBreaks; }
     Q_SIGNAL void includeActBreaksChanged();
+
+    // This property is not presented to the user, because it will be consistent with
+    // options configured in Settings.
+    Q_PROPERTY(bool capitalizeSentences READ isCapitalizeSentences WRITE setCapitalizeSentences NOTIFY capitalizeSentencesChanged DESIGNABLE false)
+    void setCapitalizeSentences(bool val);
+    bool isCapitalizeSentences() const { return m_capitalizeSentences; }
+    Q_SIGNAL void capitalizeSentencesChanged();
+
+    // This property is not presented to the user, because it will be consistent with
+    // options configured in Settings.
+    Q_PROPERTY(bool polishParagraphs READ isPolishParagraphs WRITE setPolishParagraphs NOTIFY polishParagraphsChanged DESIGNABLE false)
+    void setPolishParagraphs(bool val);
+    bool isPolishParagraphs() const { return m_polishParagraphs; }
+    Q_SIGNAL void polishParagraphsChanged();
 
     Q_CLASSINFO("episodeNumbers_FieldGroup", "Episodes")
     Q_CLASSINFO("episodeNumbers_FieldLabel", "Episodes to include in the report")
@@ -166,6 +188,7 @@ protected:
 private:
     QStringList m_tags;
     bool m_generateTitlePage = true;
+    bool m_includeLogline = false;
     bool m_printSceneContent = true;
     bool m_includeSceneIcons = true;
     bool m_includeSceneNumbers = true;
@@ -175,6 +198,8 @@ private:
     bool m_includeSceneFeaturedImage = false;
     bool m_includeSceneComments = false;
     bool m_includeActBreaks = false;
+    bool m_polishParagraphs = false;
+    bool m_capitalizeSentences = false;
     QList<int> m_episodeNumbers;
     Screenplay *m_screenplaySubset = nullptr;
     bool m_printEachSceneOnANewPage = false;

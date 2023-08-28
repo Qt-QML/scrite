@@ -54,11 +54,6 @@ bool LocationReport::doGenerate(QTextDocument *textDocument)
         if (title.isEmpty())
             title = "Untitled Screenplay";
         cursor.insertText(title);
-        if (!screenplay->subtitle().isEmpty()) {
-            cursor.insertBlock();
-            cursor.insertText(screenplay->subtitle());
-        }
-
         cursor.insertBlock();
         cursor.insertText("Location Report");
 
@@ -107,7 +102,7 @@ bool LocationReport::doGenerate(QTextDocument *textDocument)
 
         cursor.insertBlock(blockFormat, charFormat);
         cursor.insertText(it.key());
-        cursor.insertText(" (" + QString::number(headings.size()) + " occurances)");
+        cursor.insertText(" (" + QString::number(headings.size()) + " occurrences)");
 
         const QStringList locTypes = map.keys();
         for (const QString &locType : locTypes) {
@@ -144,7 +139,7 @@ bool LocationReport::doGenerate(QTextDocument *textDocument)
                     Scene *scene = heading->scene();
                     int sceneNr = screenplay->firstIndexOfScene(scene) + 1;
                     ScreenplayElement *screenplayElement = screenplay->elementAt(sceneNr - 1);
-                    QString snippet = scene->title();
+                    QString snippet = scene->synopsis();
                     if (snippet.length() > snippetLength)
                         snippet = snippet.left(snippetLength - 3) + "...";
 

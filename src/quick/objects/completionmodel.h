@@ -31,6 +31,11 @@ public:
     QStringList strings() const { return m_strings; }
     Q_SIGNAL void stringsChanged();
 
+    Q_PROPERTY(QStringList priorityStrings READ priorityStrings WRITE setPriorityStrings NOTIFY priorityStringsChanged)
+    void setPriorityStrings(QStringList val);
+    QStringList priorityStrings() const { return m_priorityStrings; }
+    Q_SIGNAL void priorityStringsChanged();
+
     Q_PROPERTY(bool acceptEnglishStringsOnly READ isAcceptEnglishStringsOnly WRITE setAcceptEnglishStringsOnly NOTIFY acceptEnglishStringsOnlyChanged)
     void setAcceptEnglishStringsOnly(bool val);
     bool isAcceptEnglishStringsOnly() const { return m_acceptEnglishStringsOnly; }
@@ -40,6 +45,14 @@ public:
     void setSortStrings(bool val);
     bool sortStrings() const { return m_sortStrings; }
     Q_SIGNAL void sortStringsChanged();
+
+    enum SortMode { CaseSensitiveSort, CaseInsensitiveSort };
+    Q_ENUM(SortMode)
+
+    Q_PROPERTY(SortMode sortMode READ sortMode WRITE setSortMode NOTIFY sortModeChanged)
+    void setSortMode(SortMode val);
+    SortMode sortMode() const { return m_sortMode; }
+    Q_SIGNAL void sortModeChanged();
 
     Q_PROPERTY(int maxVisibleItems READ maxVisibleItems WRITE setMaxVisibleItems NOTIFY maxVisibleItemsChanged)
     void setMaxVisibleItems(int val);
@@ -61,8 +74,9 @@ public:
     int currentRow() const { return m_currentRow; }
     Q_SIGNAL void currentRowChanged();
 
-    Q_PROPERTY(QString currentCompletion READ currentCompletion NOTIFY currentRowChanged)
+    Q_PROPERTY(QString currentCompletion READ currentCompletion NOTIFY currentCompletionChanged)
     QString currentCompletion() const;
+    Q_SIGNAL void currentCompletionChanged();
 
     Q_PROPERTY(int count READ count NOTIFY countChanged)
     int count() const { return m_filteredStrings.size(); }
@@ -90,19 +104,25 @@ protected:
 
 private:
     void filterStrings();
+    void prepareStrings();
+    void clearFilterStrings();
 
 private:
     int m_currentRow = -1;
     QString m_prefix;
     bool m_enabled = true;
     QStringList m_strings;
+    QStringList m_priorityStrings;
     bool m_sortStrings = true;
     int m_maxVisibleItems = 7;
     QString m_completionPrefix;
+    QStringList m_strings2;
+    QStringList m_priorityStrings2;
     QStringList m_filteredStrings;
     bool m_filterKeyStrokes = false;
     bool m_acceptEnglishStringsOnly = true;
     int m_minimumCompletionPrefixLength = 0;
+    SortMode m_sortMode = CaseInsensitiveSort;
 };
 
 #endif // COMPLETIONMODEL_H

@@ -25,6 +25,7 @@
 #include "screenplaytextdocument.h"
 
 #include <QSet>
+#include <QTextTable>
 #include <QUuid>
 
 typedef QHash<QString, Note *> IdNoteMapType;
@@ -228,25 +229,41 @@ void Note::serializeToJson(QJsonObject &json) const
 {
     json.insert(QStringLiteral("id"), this->id());
 
-    if (m_type == TextNoteType)
-        json.insert(QStringLiteral("type"), QStringLiteral("Text"));
-    else if (m_type == FormNoteType) {
-        json.insert(QStringLiteral("type"), QStringLiteral("Form"));
+    const QMetaObject *mo = &Note::staticMetaObject;
+    const QMetaEnum typeEnum = mo->enumerator(mo->indexOfEnumerator("Type"));
+    json.insert(QStringLiteral("type"), typeEnum.valueToKey(m_type));
+
+    if (m_type == FormNoteType)
         json.insert(QStringLiteral("formId"), m_formId);
-    }
 }
 
 void Note::deserializeFromJson(const QJsonObject &json)
 {
     this->setId(json.value(QStringLiteral("id")).toString());
 
-    const QString type = json.value(QStringLiteral("type")).toString();
-    if (type == QStringLiteral("Text"))
+    /**
+     * Previously type should be stored as Text, Form etc.
+     * From now on, it will be stored as TextNoteType, FormNoteType -- so that we
+     * can match the Type enum exactly. For this reason, we have to append 'NoteType'
+     * if we read type attribute from previous versions.
+     */
+    const QString noteTypeSuffix = QStringLiteral("NoteType");
+    QString typeStr = json.value(QStringLiteral("type")).toString();
+    if (!typeStr.endsWith(noteTypeSuffix))
+        typeStr += noteTypeSuffix;
+
+    const QMetaObject *mo = &Note::staticMetaObject;
+    const QMetaEnum typeEnum = mo->enumerator(mo->indexOfEnumerator("Type"));
+
+    bool ok = false;
+    const int type = typeEnum.keyToValue(qPrintable(typeStr), &ok);
+    if (ok)
+        this->setType(Type(type));
+    else
         this->setType(TextNoteType);
-    else if (type == QStringLiteral("Form")) {
-        this->setType(FormNoteType);
+
+    if (m_type == FormNoteType)
         this->setFormId(json.value(QStringLiteral("formId")).toString());
-    }
 }
 
 void Note::write(QTextCursor &cursor, const WriteOptions &options) const
@@ -356,6 +373,65 @@ void Note::write(QTextCursor &cursor, const WriteOptions &options) const
                 cursor.insertBlock(answerBlockFormat, answerCharFormat);
                 cursor.insertText(answer.trimmed());
             }
+        }
+    } else if (m_type == CheckListNoteType) {
+        const QJsonArray checkListItems = m_content.toArray();
+        if (!checkListItems.isEmpty()) {
+            QTextFrame *frame = cursor.currentFrame();
+
+            QTextTableFormat tableFormat;
+            tableFormat.setBorderCollapse(true);
+            tableFormat.setCellPadding(1);
+            tableFormat.setCellSpacing(1);
+            tableFormat.setBorder(0);
+
+            const QUrl checkedUrl(QStringLiteral("checklist://checked.png"));
+            const QUrl uncheckedUrl(QStringLiteral("checklist://unchecked.png"));
+
+            // Ensure that we have infact included checked and unchecked as resources
+            [=]() {
+                QTextDocument *doc = cursor.document();
+
+                QVariant checkedIcon = doc->resource(QTextDocument::ImageResource, checkedUrl);
+                QVariant uncheckedIcon = doc->resource(QTextDocument::ImageResource, uncheckedUrl);
+
+                if (checkedIcon.isNull() || !checkedIcon.isValid()
+                    || checkedIcon.userType() != QMetaType::QImage) {
+                    QImage image(QStringLiteral(":/icons/reports/checklistitem_checked.png"));
+                    doc->addResource(QTextDocument::ImageResource, checkedUrl, image);
+                }
+
+                if (uncheckedIcon.isNull() || !uncheckedIcon.isValid()
+                    || uncheckedIcon.userType() != QMetaType::QImage) {
+                    QImage image(QStringLiteral(":/icons/reports/checklistitem_unchecked.png"));
+                    doc->addResource(QTextDocument::ImageResource, uncheckedUrl, image);
+                }
+            }();
+
+            QTextTable *table = cursor.insertTable(checkListItems.size(), 2, tableFormat);
+
+            const QFontMetricsF defaultFontMetrics(cursor.document()->defaultFont());
+
+            for (int row = 0; row < checkListItems.size(); row++) {
+                const QJsonObject checkListItemObj = checkListItems.at(row).toObject();
+                const QString text = checkListItemObj.value(QStringLiteral("_text")).toString();
+                const bool checked = checkListItemObj.value(QStringLiteral("_checked")).toBool();
+
+                QTextImageFormat image;
+                image.setWidth(defaultFontMetrics.height());
+                image.setHeight(defaultFontMetrics.height());
+                cursor = table->cellAt(row, 0).firstCursorPosition();
+                if (checked)
+                    image.setName(checkedUrl.toString());
+                else
+                    image.setName(uncheckedUrl.toString());
+                cursor.insertImage(image);
+
+                cursor = table->cellAt(row, 1).firstCursorPosition();
+                cursor.insertText(text);
+            }
+
+            cursor = frame->lastCursorPosition();
         }
     }
 }
@@ -595,7 +671,7 @@ QString Notes::summary() const
     switch (m_ownerType) {
     case SceneOwner: {
         const Scene *scene = this->scene();
-        return scene->title();
+        return scene->synopsis();
     } break;
     case BreakOwner:
         return this->breakElement()->breakSummary();
@@ -648,6 +724,14 @@ Note *Notes::addFormNote(const QString &id)
         return nullptr;
     }
 
+    this->addNote(ptr);
+    return ptr;
+}
+
+Note *Notes::addCheckListNote()
+{
+    Note *ptr = new Note(this);
+    ptr->setType(Note::CheckListNoteType);
     this->addNote(ptr);
     return ptr;
 }
@@ -805,7 +889,8 @@ void Notes::write(QTextCursor &cursor, const WriteOptions &options) const
 {
     for (Note *note : this->constList()) {
         if ((options.includeTextNotes && note->type() == Note::TextNoteType)
-            || (options.includeFormNotes && note->type() == Note::FormNoteType))
+            || (options.includeFormNotes && note->type() == Note::FormNoteType)
+            || (options.includeCheckListNotes && note->type() == Note::CheckListNoteType))
             note->write(cursor);
     }
 }

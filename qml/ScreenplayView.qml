@@ -13,9 +13,11 @@
 
 import QtQml 2.15
 import QtQuick 2.15
+import QtQuick.Shapes 1.5
 import QtQuick.Controls 2.15
 
 import io.scrite.components 1.0
+import "../js/utils.js" as Utils
 
 Item {
     id: screenplayView
@@ -34,7 +36,7 @@ Item {
         target: Scrite.document.screenplay
         function onCurrentElementIndexChanged(val) {
             if(!Scrite.document.loading) {
-                Scrite.app.execLater(screenplayElementList, 150, function() {
+                Utils.execLater(screenplayElementList, 150, function() {
                     if(screenplayElementList.currentIndex === 0)
                         screenplayElementList.positionViewAtBeginning()
                     else if(screenplayElementList.currentIndex === screenplayElementList.count-1)
@@ -533,7 +535,7 @@ Item {
                                 ret += "NO SCENE HEADING"
                         }
                     } else
-                        ret += escene.title
+                        ret += escene.synopsis
                 } else if(isEpisodeBreak)
                     ret = "EP " + (element.episodeIndex+1)
                 else
@@ -554,7 +556,8 @@ Item {
             }
 
             width: isBreakElement ? screenplayElementList.breakDelegateWidth :
-                   Math.max(screenplayElementList.minimumDelegateWidth, sceneElementCount*screenplayElementList.perElementWidth*zoomLevel)
+                    (element.omitted ? screenplayElementList.minimumDelegateWidth
+                                     : Math.max(screenplayElementList.minimumDelegateWidth, sceneElementCount*screenplayElementList.perElementWidth*zoomLevel))
             height: screenplayElementList.height
 
             Rectangle {
@@ -574,7 +577,8 @@ Item {
                 enabled: !delegateDropArea.containsDrag
                 sourceComponent: Rectangle {
                     id: elementItemBoxItem
-                    color: element.scene ? Qt.tint(sceneColor, (element.selected || elementItemDelegate.active) ? "#9CFFFFFF" : "#C0FFFFFF") : sceneColor
+                    property color sceneColor2 : Qt.tint(sceneColor, (element.selected || elementItemDelegate.active) ? "#9CFFFFFF" : "#C0FFFFFF")
+                    color: element.scene ? (elementItemDelegate.element.omitted ? Qt.tint(sceneColor2, "#C0FFFFFF") : sceneColor2) : sceneColor
                     border.color: color === Qt.rgba(1,1,1,1) ? "black" : sceneColor
                     border.width: elementItemDelegate.active ? 2 : 1
                     Behavior on border.width {
@@ -638,9 +642,11 @@ Item {
                                 else
                                     ret = idxList.length + " Scenes"
 
-                                var from = Scrite.document.screenplay.elementAt(idxList[0])
-                                var to = Scrite.document.screenplay.elementAt(idxList[idxList.length-1])
-                                ret += ", Length: " + screenplayTextDocument.lengthInTimeAsString(from, to)
+                                if(!screenplayTextDocument.paused) {
+                                    var from = Scrite.document.screenplay.elementAt(idxList[0])
+                                    var to = Scrite.document.screenplay.elementAt(idxList[idxList.length-1])
+                                    ret += ", Length: " + screenplayTextDocument.lengthInTimeAsString(from, to)
+                                }
 
                                 return ret
                             }
@@ -784,6 +790,16 @@ Item {
                                     elementItemDelegate.Drag.imageSource = result.url
                                 })
                             }
+                        }
+                    }
+
+                    Loader {
+                        anchors.fill: parent
+                        anchors.margins: parent.width * 0.25
+                        active: elementItemDelegate.element.omitted
+                        sourceComponent: Image {
+                            source: "../icons/content/omitted_scene.png"
+                            fillMode: Image.PreserveAspectFit
                         }
                     }
                 }
@@ -957,6 +973,6 @@ Item {
     }
 
     function requestEditorLater() {
-        Scrite.app.execLater(screenplayView, 100, function() { requestEditor() })
+        Utils.execLater(screenplayView, 100, function() { requestEditor() })
     }
 }

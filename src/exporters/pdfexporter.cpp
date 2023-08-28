@@ -25,6 +25,7 @@
 #include <QTextDocument>
 #include <QObjectCleanupHandler>
 #include <QAbstractTextDocumentLayout>
+#include <QPainter>
 
 PdfExporter::PdfExporter(QObject *parent) : AbstractTextDocumentExporter(parent) { }
 
@@ -37,6 +38,15 @@ void PdfExporter::setGenerateTitlePage(bool val)
 
     m_generateTitlePage = val;
     emit generateTitlePageChanged();
+}
+
+void PdfExporter::setIncludeLogline(bool val)
+{
+    if (m_includeLogline == val)
+        return;
+
+    m_includeLogline = val;
+    emit includeLoglineChanged();
 }
 
 void PdfExporter::setIncludeSceneNumbers(bool val)
@@ -117,6 +127,19 @@ void PdfExporter::setComment(const QString &val)
     emit commentChanged();
 }
 
+class PdfSideBar : public QTextDocumentPageSideBarInterface
+{
+public:
+    // AbstractPageSideBar interface
+    void paint(QPainter *paint, Side side, const QRectF &rect, const QRectF &docRect)
+    {
+#if 0
+        if (side == RightSide)
+            paint->fillRect(rect, Qt::yellow);
+#endif
+    }
+};
+
 bool PdfExporter::doExport(QIODevice *device)
 {
     Screenplay *screenplay = this->document()->screenplay();
@@ -170,7 +193,10 @@ bool PdfExporter::doExport(QIODevice *device)
     textDocument.setProperty("#comment", m_comment);
     textDocument.setProperty("#watermark", m_watermark);
 
+    PdfSideBar sideBar;
+
     QTextDocumentPagedPrinter printer;
+    printer.setSideBar(&sideBar);
     printer.header()->setVisibleFromPageOne(!m_generateTitlePage);
     printer.footer()->setVisibleFromPageOne(!m_generateTitlePage);
     printer.watermark()->setVisibleFromPageOne(!m_generateTitlePage);
@@ -194,12 +220,4 @@ bool PdfExporter::doExport(QIODevice *device)
     }
 
     return success;
-}
-
-QString PdfExporter::polishFileName(const QString &fileName) const
-{
-    QFileInfo fi(fileName);
-    if (fi.suffix().toLower() != "pdf")
-        return fileName + ".pdf";
-    return fileName;
 }

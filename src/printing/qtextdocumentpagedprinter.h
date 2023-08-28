@@ -188,7 +188,7 @@ public:
 
 private:
     QFont m_font = QFont("Courier Prime", 120, QFont::Bold);
-    QString m_text = "Scrite";
+    QString m_text = QLatin1String("Scrite");
     QColor m_color = QColor(Qt::lightGray);
     qreal m_opacity = 0.5;
     qreal m_rotation = -45;
@@ -197,6 +197,13 @@ private:
     bool m_visibleFromPageOne = false;
     char m_padding[2];
     QRectF m_rect;
+};
+
+class QTextDocumentPageSideBarInterface
+{
+public:
+    enum Side { LeftSide, RightSide };
+    virtual void paint(QPainter *paint, Side side, const QRectF &rect, const QRectF &docRect) = 0;
 };
 
 class QTextDocumentPagedPrinter : public QObject
@@ -218,15 +225,19 @@ public:
     Q_PROPERTY(Watermark* watermark READ watermark CONSTANT)
     Watermark *watermark() const { return m_watermark; }
 
+    void setSideBar(QTextDocumentPageSideBarInterface *val) { m_sideBar = val; }
+    QTextDocumentPageSideBarInterface *sideBar() const { return m_sideBar; }
+
     Q_INVOKABLE bool print(QTextDocument *document, QPagedPaintDevice *device);
 
     static void loadSettings(HeaderFooter *header, HeaderFooter *footer, Watermark *watermark);
 
 private:
     void printPageContents(int pageNr, int pageCount, QPainter *painter, const QTextDocument *doc,
-                           const QRectF &body);
+                           const QRectF &body, QRectF &docPageRect);
     void printHeaderFooterWatermark(int pageNr, int pageCount, QPainter *painter,
-                                    const QTextDocument *doc, const QRectF &body);
+                                    const QTextDocument *doc, const QRectF &body,
+                                    const QRectF &docPageRect);
 
 private:
     HeaderFooter *m_header = new HeaderFooter(HeaderFooter::Header, this);
@@ -236,6 +247,7 @@ private:
     ProgressReport *m_progressReport = new ProgressReport(this);
     QPagedPaintDevice *m_printer = nullptr;
     QTextDocument *m_textDocument = nullptr;
+    QTextDocumentPageSideBarInterface *m_sideBar = nullptr;
     QRectF m_headerRect;
     QRectF m_footerRect;
 };

@@ -17,6 +17,7 @@ import io.scrite.components 1.0
 Item {
     id: dockWidget
     property alias title: titleText.text
+    property alias titleBarHeight: titleBar.height
     property alias active: contentLoader.active
     property alias content: contentLoader.sourceComponent
     property alias closable: closeButton.visible
@@ -110,6 +111,13 @@ Item {
         width: (sourceGeometry.width + (targetGeometry.width - sourceGeometry.width)*t)
         height: (sourceGeometry.height + (targetGeometry.height - sourceGeometry.height)*t)
 
+        MouseArea {
+            anchors.fill: parent
+            hoverEnabled: true
+            propagateComposedEvents: false
+            enabled: dockWidget.visible
+        }
+
         Rectangle {
             id: titleBar
             anchors.top: parent.top
@@ -122,7 +130,7 @@ Item {
                 id: titleText
                 anchors.centerIn: parent
                 font.pointSize: Scrite.app.idealFontPointSize
-                text: primaryColors.c300.text
+                color: primaryColors.c300.text
             }
 
             MouseArea {
@@ -154,17 +162,21 @@ Item {
             }
         }
 
-        Loader {
-            id: contentLoader
+        Item {
             anchors.top: titleBar.bottom
             anchors.left: parent.left
             anchors.right: parent.right
             anchors.bottom: parent.bottom
-            active: dockWidget.visible
-            clip: true
-            transformOrigin: Item.TopLeft
-            scale: parent.t
-            FocusTracker.window: Scrite.window
+
+            Loader {
+                id: contentLoader
+                anchors.fill: parent
+                active: dockWidget.visible
+                clip: true
+                transformOrigin: Item.TopLeft
+                scale: parent.t
+                FocusTracker.window: Scrite.window
+            }
         }
     }
 

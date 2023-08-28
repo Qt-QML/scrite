@@ -135,7 +135,8 @@ public:
 
     Q_INVOKABLE void activateDefaultLanguage();
 
-    QTextBlockFormat createBlockFormat(const qreal *pageWidth = nullptr) const;
+    QTextBlockFormat createBlockFormat(Qt::Alignment overrideAlignment,
+                                       const qreal *pageWidth = nullptr) const;
     QTextCharFormat createCharFormat(const qreal *pageWidth = nullptr) const;
 
     Q_SIGNAL void elementFormatChanged();
@@ -182,6 +183,7 @@ private:
     SceneElement::Type m_elementType = SceneElement::Action;
     DefaultLanguage m_defaultLanguage = Default;
 
+    mutable Qt::Alignment m_lastCreatedBlockAlignment;
     mutable qreal m_lastCreatedBlockFormatPageWidth = 0;
     mutable QTextBlockFormat m_lastCreatedBlockFormat;
     mutable qreal m_lastCreatedCharFormatPageWidth = 0;
@@ -300,10 +302,13 @@ private:
     ExecLaterTimer m_evaluateRectsTimer;
 };
 
-class ScreenplayFormat : public QAbstractListModel, public Modifiable
+class ScreenplayFormat : public QAbstractListModel,
+                         public Modifiable,
+                         public QObjectSerializer::Interface
 {
     Q_OBJECT
     QML_ELEMENT
+    Q_INTERFACES(QObjectSerializer::Interface)
     QML_UNCREATABLE("Instantiation from QML not allowed.")
 
 public:
@@ -403,6 +408,9 @@ public:
     Q_SIGNAL void inTransactionChanged();
 
     void useUserSpecifiedFonts();
+
+    // Interface interface
+    void deserializeFromJson(const QJsonObject &);
 
 private:
     void resetScreen();
@@ -507,6 +515,7 @@ private:
     QColor m_backgroundColor = Qt::transparent;
 };
 
+class SceneDocumentBlockUserData;
 class SceneDocumentBinder : public QSyntaxHighlighter, public QQmlParserStatus
 {
     Q_OBJECT
@@ -528,6 +537,11 @@ public:
     Scene *scene() const { return m_scene; }
     Q_SIGNAL void sceneChanged();
 
+    Q_PROPERTY(ScreenplayElement* screenplayElement READ screenplayElement WRITE setScreenplayElement NOTIFY screenplayElementChanged RESET resetScreenplayElement)
+    void setScreenplayElement(ScreenplayElement *val);
+    ScreenplayElement *screenplayElement() const { return m_screenplayElement; }
+    Q_SIGNAL void screenplayElementChanged();
+
     Q_PROPERTY(QQuickTextDocument *textDocument READ textDocument WRITE setTextDocument NOTIFY
                        textDocumentChanged RESET resetTextDocument)
     void setTextDocument(QQuickTextDocument *val);
@@ -545,6 +559,17 @@ public:
     void setLiveSpellCheckEnabled(bool val);
     bool isLiveSpellCheckEnabled() const { return m_liveSpellCheckEnabled; }
     Q_SIGNAL void liveSpellCheckEnabledChanged();
+
+    Q_PROPERTY(bool autoCapitalizeSentences READ isAutoCapitalizeSentences WRITE setAutoCapitalizeSentences NOTIFY autoCapitalizeSentencesChanged)
+    void setAutoCapitalizeSentences(bool val);
+    bool isAutoCapitalizeSentences() const { return m_autoCapitalizeSentences; }
+    Q_SIGNAL void autoCapitalizeSentencesChanged();
+
+    // Adds : at end of shots & transitions, CONT'D for characters where applicable.
+    Q_PROPERTY(bool autoPolishParagraphs READ autoPolishParagraphs WRITE setAutoPolishParagraphs NOTIFY autoPolishParagraphsChanged)
+    void setAutoPolishParagraphs(bool val);
+    bool autoPolishParagraphs() const { return m_autoPolishParagraphs; }
+    Q_SIGNAL void autoPolishParagraphsChanged();
 
     Q_PROPERTY(qreal textWidth READ textWidth WRITE setTextWidth NOTIFY textWidthChanged)
     void setTextWidth(qreal val);
@@ -569,9 +594,13 @@ public:
     int selectionEndPosition() const { return m_selectionEndPosition; }
     Q_SIGNAL void selectionEndPositionChanged();
 
+    enum TextCasing { LowerCase, UpperCase };
+    Q_ENUM(TextCasing)
+
+    Q_INVOKABLE bool changeTextCase(SceneDocumentBinder::TextCasing casing);
+
     Q_PROPERTY(bool applyTextFormat READ isApplyTextFormat WRITE setApplyTextFormat NOTIFY
-                       applyTextFormatChanged)
-    void setApplyTextFormat(bool val);
+                       applyTextFormatChanged) void setApplyTextFormat(bool val);
     bool isApplyTextFormat() const { return m_applyTextFormat; }
     Q_SIGNAL void applyTextFormatChanged();
 
@@ -670,6 +699,9 @@ public:
     QStringList autoCompleteHints() const { return m_autoCompleteHints; }
     Q_SIGNAL void autoCompleteHintsChanged();
 
+    Q_PROPERTY(QStringList priorityAutoCompleteHints READ priorityAutoCompleteHints NOTIFY autoCompleteHintsChanged)
+    QStringList priorityAutoCompleteHints() const { return m_priorityAutoCompleteHints; }
+
     Q_PROPERTY(SceneElement::Type autoCompleteHintsFor READ autoCompleteHintsFor NOTIFY
                        autoCompleteHintsForChanged)
     SceneElement::Type autoCompleteHintsFor() const { return m_autoCompleteHintsFor; }
@@ -678,6 +710,30 @@ public:
     Q_PROPERTY(QString completionPrefix READ completionPrefix NOTIFY completionPrefixChanged)
     QString completionPrefix() const { return m_completionPrefix; }
     Q_SIGNAL void completionPrefixChanged();
+
+    Q_PROPERTY(int completionPrefixStart READ completionPrefixStart NOTIFY completionPrefixChanged)
+    int completionPrefixStart() const { return m_completionPrefixStart; }
+
+    Q_PROPERTY(int completionPrefixEnd READ completionPrefixEnd NOTIFY completionPrefixChanged)
+    int completionPrefixEnd() const { return m_completionPrefixEnd; }
+
+    Q_PROPERTY(bool hasCompletionPrefixBoundary READ hasCompletionPrefixBoundary NOTIFY completionPrefixChanged)
+    bool hasCompletionPrefixBoundary() const
+    {
+        return m_completionPrefixStart >= 0 && m_completionPrefixEnd >= 0;
+    }
+
+    enum CompletionMode {
+        NoCompletionMode,
+        CharacterNameCompletionMode,
+        CharacterBracketNotationCompletionMode,
+        ShotCompletionMode,
+        TransitionCompletionMode
+    };
+    Q_ENUM(CompletionMode)
+    Q_PROPERTY(CompletionMode completionMode READ completionMode NOTIFY completionModeChanged)
+    CompletionMode completionMode() const { return m_completionMode; }
+    Q_SIGNAL void completionModeChanged();
 
     Q_PROPERTY(QFont currentFont READ currentFont NOTIFY currentFontChanged)
     QFont currentFont() const;
@@ -710,11 +766,16 @@ protected:
 
     // QObject interface
     void timerEvent(QTimerEvent *te);
+    bool eventFilter(QObject *watched, QEvent *event);
+
+    // Helpers
+    void mergeFormat(int start, int count, const QTextCharFormat &format);
 
 private:
     void resetScene();
     void resetTextDocument();
     void resetScreenplayFormat();
+    void resetScreenplayElement();
 
     void initializeDocument();
     void initializeDocumentLater();
@@ -726,23 +787,35 @@ private:
     void onContentsChange(int from, int charsRemoved, int charsAdded);
     void syncSceneFromDocument(int nrBlocks = -1);
 
-    void evaluateAutoCompleteHints();
+    void evaluateAutoCompleteHintsAndCompletionPrefix();
     void setAutoCompleteHintsFor(SceneElement::Type val);
-    void setAutoCompleteHints(const QStringList &val);
-    void setCompletionPrefix(const QString &val);
+    void setAutoCompleteHints(const QStringList &hints,
+                              const QStringList &priorityHints = QStringList());
+    void setCompletionPrefix(const QString &prefix, int start = -1, int end = -1);
+    void setCompletionMode(CompletionMode val);
     void setSpellingSuggestions(const QStringList &val);
     void setWordUnderCursorIsMisspelled(bool val);
 
     void onSceneAboutToReset();
     void onSceneReset(int position);
+    void onSceneRefreshed();
 
     void rehighlightLater();
     void rehighlightBlockLater(const QTextBlock &block);
 
+    void applyBlockFormatLater(const QTextBlock &block);
+
     void onTextFormatChanged(const QList<int> &properties);
+
+    void polishAllSceneElements();
+    void polishSceneElement(SceneElement *element);
+
+    void performAllSceneElementTasks();
 
 private:
     friend class SpellCheckService;
+    friend class ForceCursorPositionHack;
+    friend class SceneDocumentBlockUserData;
     qreal m_textWidth = 0;
     int m_cursorPosition = -1;
     int m_selectionEndPosition = -1;
@@ -753,30 +826,42 @@ private:
     int m_documentLoadCount = 0;
     TextFormat *m_textFormat = new TextFormat(this);
     bool m_sceneIsBeingReset = false;
+    bool m_sceneIsBeingRefreshed = false;
+    bool m_sceneElementTaskIsRunning = false;
     bool m_forceSyncDocument = false;
     bool m_spellCheckEnabled = true;
     bool m_applyLanguageFonts = false;
     QString m_completionPrefix;
+    int m_completionPrefixEnd = -1;
+    int m_completionPrefixStart = -1;
+    CompletionMode m_completionMode = NoCompletionMode;
     bool m_initializingDocument = false;
     QStringList m_shots;
     QStringList m_transitions;
     QStringList m_characterNames;
     bool m_liveSpellCheckEnabled = true;
+    bool m_autoCapitalizeSentences = true;
+    bool m_autoPolishParagraphs = true;
     QObjectProperty<Scene> m_scene;
     bool m_applyNextCharFormat = false;
     QTextCharFormat m_nextCharFormat;
     ExecLaterTimer m_rehighlightTimer;
     QStringList m_autoCompleteHints;
+    QStringList m_priorityAutoCompleteHints;
     QStringList m_spellingSuggestions;
     int m_currentElementCursorPosition = -1;
     bool m_wordUnderCursorIsMisspelled = false;
     ExecLaterTimer m_initializeDocumentTimer;
+    ExecLaterTimer m_sceneElementTaskTimer;
+    ExecLaterTimer m_applyBlockFormatTimer;
     QList<SceneElement::Type> m_tabHistory;
     bool m_applyFormattingEvenInTransaction = false;
+    QList<QTextBlock> m_applyBlockFormatQueue;
     QList<QTextBlock> m_rehighlightBlockQueue;
     QObjectProperty<SceneElement> m_currentElement;
     QObjectProperty<QQuickTextDocument> m_textDocument;
     QObjectProperty<ScreenplayFormat> m_screenplayFormat;
+    QObjectProperty<ScreenplayElement> m_screenplayElement;
     SceneElement::Type m_autoCompleteHintsFor = SceneElement::Action;
 };
 

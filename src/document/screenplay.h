@@ -116,17 +116,21 @@ public:
     bool isExpanded() const { return m_expanded; }
     Q_SIGNAL void expandedChanged();
 
+    Q_PROPERTY(bool omitted READ isOmitted WRITE setOmitted NOTIFY omittedChanged)
+    void setOmitted(bool val);
+    bool isOmitted() const { return m_omitted; }
+    Q_SIGNAL void omittedChanged();
+
     Q_PROPERTY(
             QJsonValue userData READ userData WRITE setUserData NOTIFY userDataChanged STORED false)
     void setUserData(const QJsonValue &val);
     QJsonValue userData() const { return m_userData; }
     Q_SIGNAL void userDataChanged();
 
-    Q_PROPERTY(
-            QJsonValue editorHints READ editorHints WRITE setEditorHints NOTIFY editorHintsChanged)
-    void setEditorHints(const QJsonValue &val);
-    QJsonValue editorHints() const { return m_editorHints; }
-    Q_SIGNAL void editorHintsChanged();
+    Q_PROPERTY(qreal heightHint READ heightHint WRITE setHeightHint NOTIFY heightHintChanged)
+    void setHeightHint(qreal val);
+    qreal heightHint() const { return m_heightHint; }
+    Q_SIGNAL void heightHintChanged();
 
     Q_PROPERTY(bool selected READ isSelected WRITE setSelected NOTIFY selectedChanged STORED false)
     void setSelected(bool val);
@@ -217,6 +221,7 @@ private:
     friend class AbstractImporter;
     friend class AbstractScreenplaySubsetReport;
 
+    bool m_omitted = false;
     bool m_expanded = true;
     int m_breakType = -1;
     bool m_selected = false;
@@ -229,11 +234,11 @@ private:
     Attachments *m_attachments = nullptr;
     QString m_breakTitle;
     QJsonValue m_userData;
+    qreal m_heightHint = 0;
     QString m_breakSummary;
     QString m_breakSubtitle;
     int m_customSceneNumber = -1;
     bool m_elementTypeIsSet = false;
-    QJsonValue m_editorHints;
     QString m_userSceneNumber;
     ElementType m_elementType = SceneElementType;
     QObjectProperty<Scene> m_scene;
@@ -269,6 +274,11 @@ public:
     void setLogline(const QString &val);
     QString logline() const { return m_logline; }
     Q_SIGNAL void loglineChanged();
+
+    Q_PROPERTY(QString loglineComments READ loglineComments WRITE setLoglineComments NOTIFY loglineCommentsChanged)
+    void setLoglineComments(const QString &val);
+    QString loglineComments() const { return m_loglineComments; }
+    Q_SIGNAL void loglineCommentsChanged();
 
     Q_PROPERTY(QString basedOn READ basedOn WRITE setBasedOn NOTIFY basedOnChanged)
     void setBasedOn(const QString &val);
@@ -314,6 +324,10 @@ public:
     bool isEmpty() const;
     Q_SIGNAL void emptyChanged();
 
+    Q_PROPERTY(bool heightHintsAvailable READ isHeightHintsAvailable NOTIFY heightHintsAvailableChanged)
+    bool isHeightHintsAvailable() const { return m_heightHintsAvailable; }
+    Q_SIGNAL void heightHintsAvailableChanged();
+
     Q_PROPERTY(QString coverPagePhoto READ coverPagePhoto NOTIFY coverPagePhotoChanged STORED false)
     Q_INVOKABLE void setCoverPagePhoto(const QString &val);
     Q_INVOKABLE void clearCoverPagePhoto();
@@ -348,6 +362,14 @@ public:
     bool hasSelectedElements() const;
     Q_SIGNAL void hasSelectedElementsChanged();
 
+    enum OmitStatus { Omitted, NotOmitted, PartiallyOmitted };
+    Q_ENUM(OmitStatus)
+
+    Q_PROPERTY(OmitStatus selectedElementsOmitStatus READ selectedElementsOmitStatus WRITE setSelectedElementsOmitStatus NOTIFY selectedElementsOmitStatusChanged)
+    void setSelectedElementsOmitStatus(OmitStatus val);
+    OmitStatus selectedElementsOmitStatus() const;
+    Q_SIGNAL void selectedElementsOmitStatusChanged();
+
     Q_PROPERTY(QQmlListProperty<ScreenplayElement> elements READ elements NOTIFY elementsChanged)
     QQmlListProperty<ScreenplayElement> elements();
     Q_INVOKABLE void addElement(ScreenplayElement *ptr);
@@ -359,6 +381,8 @@ public:
     Q_INVOKABLE void moveElement(ScreenplayElement *ptr, int toRow);
     Q_INVOKABLE void moveSelectedElements(int toRow);
     Q_INVOKABLE void removeSelectedElements();
+    Q_INVOKABLE void omitSelectedElements();
+    Q_INVOKABLE void includeSelectedElements();
     Q_INVOKABLE void clearSelection();
     void setSelection(const QList<ScreenplayElement *> &elements);
     Q_INVOKABLE ScreenplayElement *elementAt(int index) const;
@@ -371,6 +395,8 @@ public:
     Q_SIGNAL void elementInserted(ScreenplayElement *element, int index);
     Q_SIGNAL void elementRemoved(ScreenplayElement *element, int index);
     Q_SIGNAL void elementMoved(ScreenplayElement *element, int from, int to);
+    Q_SIGNAL void elementOmitted(ScreenplayElement *element, int index);
+    Q_SIGNAL void elementIncluded(ScreenplayElement *element, int index);
     Q_SIGNAL void aboutToMoveElements(int at);
 
     Q_SIGNAL void elementSceneGroupsChanged(ScreenplayElement *ptr);
@@ -458,6 +484,9 @@ public:
 
     Q_INVOKABLE void resetSceneNumbers();
 
+    Q_INVOKABLE bool polishText();
+    Q_INVOKABLE bool capitalizeSentences();
+
     Q_PROPERTY(int wordCount READ wordCount NOTIFY wordCountChanged)
     int wordCount() const { return m_wordCount; }
     Q_SIGNAL void wordCountChanged();
@@ -493,6 +522,8 @@ public:
         WriteOptions() { }
         bool includeTextNotes = true;
         bool includeFormNotes = true;
+        bool actsOnNewPage = false;
+        bool episodesOnNewPage = false;
     };
     void write(QTextCursor &cursor, const WriteOptions &options = WriteOptions()) const;
 
@@ -501,6 +532,7 @@ protected:
     void timerEvent(QTimerEvent *te);
     void resetActiveScene();
     void onSceneReset(int elementIndex);
+    void onScreenplayElementOmittedChanged();
     void evaluateSceneNumbers(bool minorAlso = false);
     void evaluateSceneNumbersLater();
     void validateCurrentElementIndex();
@@ -520,6 +552,9 @@ protected:
     void evaluateWordCount();
     void evaluateWordCountLater();
     bool getPasteDataFromClipboard(QJsonObject &clipboardJson) const;
+    void setHeightHintsAvailable(bool val);
+    void evaluateIfHeightHintsAreAvailable();
+    void evaluateIfHeightHintsAreAvailableLater();
 
 private:
     QString m_title;
@@ -534,11 +569,13 @@ private:
     QString m_subtitle;
     QString m_phoneNumber;
     QString m_coverPagePhoto;
+    QString m_loglineComments;
     bool m_titlePageIsCentered = true;
     int m_minimumParagraphCount = 0;
     int m_maximumParagraphCount = 0;
     int m_averageParagraphCount = 0;
     bool m_hasTitlePageAttributes = false;
+    bool m_heightHintsAvailable = false;
     ScriteDocument *m_scriteDocument = nullptr;
     CoverPagePhotoSize m_coverPagePhotoSize = LargeCoverPhoto;
     friend class ScreenplayTextDocument;
@@ -564,6 +601,8 @@ private:
     ExecLaterTimer m_updateBreakTitlesTimer;
     ExecLaterTimer m_sceneNumberEvaluationTimer;
     ExecLaterTimer m_paragraphCountEvaluationTimer;
+    ExecLaterTimer m_evalHeightHintsAvailableTimer;
+    ExecLaterTimer m_selectedElementsOmitStatusChangedTimer;
 };
 
 /**

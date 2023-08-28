@@ -44,6 +44,7 @@
 #include <QTextBlockUserData>
 #include <QScopedValueRollback>
 #include <QAbstractTextDocumentLayout>
+#include <QSettings>
 
 inline QTime secondsToTime(int seconds)
 {
@@ -332,6 +333,17 @@ void ScreenplayTextDocument::setTitlePage(bool val)
 
     m_titlePage = val;
     emit titlePageChanged();
+
+    this->loadScreenplayLater();
+}
+
+void ScreenplayTextDocument::setIncludeLoglineInTitlePage(bool val)
+{
+    if (m_includeLoglineInTitlePage == val)
+        return;
+
+    m_includeLoglineInTitlePage = val;
+    emit includeLoglineInTitlePageChanged();
 
     this->loadScreenplayLater();
 }
@@ -722,25 +734,25 @@ If you ran the following script, then you would be able to get a fairly good sup
 the save the cat structure on an existing screenplay.
 
 var structure = {
-    "name": "Save The Cat",
-    "pageCount": 110,
-    "elements": [
-        {"name": "Opening Image", "page": 1, "act": "ACT 1" },
-        {"name": "Setup", "page": "1-10", "act": "ACT 1" },
-        {"name": "Theme Stated", "page": 5, "act": "ACT 1", "allowMultiple": true },
-        {"name": "Catalyst", "page": 12, "act": "ACT 1" },
-        {"name": "Debate", "page": "12-25", "act": "ACT 1"},
-        {"name": "Break Into Two", "page": "25-30", "act": "ACT 1" },
-        {"name": "B Story", "page": 30, "act": "ACT 2A" },
-        {"name": "Fun And Games", "page": "30-55", "act": "ACT 2A" },
-        {"name": "Midpoint", "page": 55, "act": "ACT 2A" },
-        {"name": "Bad Guys Close In", "page": "55-75", "act": "ACT 2B" },
-        {"name": "All Is Lost", "page": 75, "act": "ACT 2B" },
-        {"name": "Dark Night Of The Soul", "page": "75-85", "act": "ACT 2B" },
-        {"name": "Break Into Three", "page": 85, "act": "ACT 2B"},
-        {"name": "Finale", "page": "85-110", "act": "ACT 3" },
-        {"name": "Final Image", "page": 110, "act": "ACT 3" }
-    ]
+ "name": "Save The Cat",
+ "pageCount": 110,
+ "elements": [
+     {"name": "Opening Image", "page": 1, "act": "ACT 1" },
+     {"name": "Setup", "page": "1-10", "act": "ACT 1" },
+     {"name": "Theme Stated", "page": 5, "act": "ACT 1", "allowMultiple": true },
+     {"name": "Catalyst", "page": 12, "act": "ACT 1" },
+     {"name": "Debate", "page": "12-25", "act": "ACT 1"},
+     {"name": "Break Into Two", "page": "25-30", "act": "ACT 1" },
+     {"name": "B Story", "page": 30, "act": "ACT 2A" },
+     {"name": "Fun And Games", "page": "30-55", "act": "ACT 2A" },
+     {"name": "Midpoint", "page": 55, "act": "ACT 2A" },
+     {"name": "Bad Guys Close In", "page": "55-75", "act": "ACT 2B" },
+     {"name": "All Is Lost", "page": 75, "act": "ACT 2B" },
+     {"name": "Dark Night Of The Soul", "page": "75-85", "act": "ACT 2B" },
+     {"name": "Break Into Three", "page": 85, "act": "ACT 2B"},
+     {"name": "Finale", "page": "85-110", "act": "ACT 3" },
+     {"name": "Final Image", "page": 110, "act": "ACT 3" }
+ ]
 }
 
 screenplayTextDocument.superImposeStructure(structure)
@@ -1173,6 +1185,7 @@ void ScreenplayTextDocument::loadScreenplay()
     m_textDocument->setProperty("#phone", m_screenplay->phoneNumber());
     m_textDocument->setProperty("#email", m_screenplay->email());
     m_textDocument->setProperty("#website", m_screenplay->website());
+    m_textDocument->setProperty("#includeLoglineInTitlePage", m_includeLoglineInTitlePage);
 
     QTextBlockFormat frameBoundaryBlockFormat;
     frameBoundaryBlockFormat.setLineHeight(0, QTextBlockFormat::FixedHeight);
@@ -1232,7 +1245,8 @@ void ScreenplayTextDocument::loadScreenplay()
             const SceneElementFormat *firstParaFormat =
                     m_formatting->elementFormat(SceneElement::Heading);
             const qreal pageWidth = m_formatting->pageLayout()->contentWidth();
-            const QTextBlockFormat blockFormat = firstParaFormat->createBlockFormat(&pageWidth);
+            const QTextBlockFormat blockFormat =
+                    firstParaFormat->createBlockFormat(Qt::Alignment(), &pageWidth);
             actBlockFormat.setTopMargin(blockFormat.topMargin());
         }
 
@@ -1314,7 +1328,8 @@ void ScreenplayTextDocument::loadScreenplay()
 
             const SceneElementFormat *firstParaFormat = m_formatting->elementFormat(firstParaType);
             const qreal pageWidth = m_formatting->pageLayout()->contentWidth();
-            const QTextBlockFormat blockFormat = firstParaFormat->createBlockFormat(&pageWidth);
+            const QTextBlockFormat blockFormat =
+                    firstParaFormat->createBlockFormat(Qt::Alignment(), &pageWidth);
             frameFormat.setTopMargin(blockFormat.topMargin());
         }
 
@@ -1352,13 +1367,13 @@ void ScreenplayTextDocument::includeMoreAndContdMarkers()
     /**
       When we print a screenplay, we expect it to do the following
 
-      1. Slug line or Scene Heading cannot come on the last line of the page
-      2. Character name cannot be on the last line of the page
-      3. If only one line of the dialogue can be squeezed into the last line of the page, then
-         we must move it to the next page along with the charactername.
-      4. If a dialogue spans across page break, then we must insert MORE and CONT'D markers, with
-      character name.
-      */
+       1. Slug line or Scene Heading cannot come on the last line of the page
+       2. Character name cannot be on the last line of the page
+       3. If only one line of the dialogue can be squeezed into the last line of the page, then
+          we must move it to the next page along with the charactername.
+       4. If a dialogue spans across page break, then we must insert MORE and CONT'D markers, with
+       character name.
+       */
     const ScreenplayPageLayout *pageLayout = m_formatting->pageLayout();
     const QMarginsF pageMargins = pageLayout->margins();
     const QFont defaultFont = m_formatting->defaultFont();
@@ -1433,7 +1448,7 @@ void ScreenplayTextDocument::includeMoreAndContdMarkers()
                                      QStringLiteral("  (MORE)"));
         cursor.insertText(QString(QChar::ObjectReplacementCharacter), moreMarkerFormat);
 
-        QTextBlockFormat characterBlockFormat = characterFormat->createBlockFormat();
+        QTextBlockFormat characterBlockFormat = characterFormat->createBlockFormat(Qt::Alignment());
         QTextCharFormat characterCharFormat = characterFormat->createCharFormat();
         characterBlockFormat.setTopMargin(0);
         cursor.insertBlock(characterBlockFormat, characterCharFormat);
@@ -1541,7 +1556,8 @@ void ScreenplayTextDocument::includeMoreAndContdMarkers()
                     cursor.select(QTextCursor::BlockUnderCursor);
                     cursor.removeSelectedText();
 
-                    QTextBlockFormat dialogBlockFormat = dialogueFormat->createBlockFormat();
+                    QTextBlockFormat dialogBlockFormat =
+                            dialogueFormat->createBlockFormat(Qt::Alignment());
                     QTextCharFormat dialogCharFormat = dialogueFormat->createCharFormat();
                     cursor.insertBlock(dialogBlockFormat, dialogCharFormat);
                     if (m_purpose == ForDisplay)
@@ -1632,6 +1648,10 @@ void ScreenplayTextDocument::connectToScreenplaySignals()
             &ScreenplayTextDocument::onActiveSceneChanged, Qt::UniqueConnection);
     connect(m_screenplay, &Screenplay::modelAboutToBeReset, this,
             &ScreenplayTextDocument::onScreenplayAboutToReset, Qt::UniqueConnection);
+    connect(m_screenplay, &Screenplay::elementOmitted, this,
+            &ScreenplayTextDocument::onSceneOmitted, Qt::UniqueConnection);
+    connect(m_screenplay, &Screenplay::elementIncluded, this,
+            &ScreenplayTextDocument::onSceneIncluded, Qt::UniqueConnection);
 
     for (int i = 0; i < m_screenplay->elementCount(); i++) {
         ScreenplayElement *element = m_screenplay->elementAt(i);
@@ -1685,6 +1705,10 @@ void ScreenplayTextDocument::disconnectFromScreenplaySignals()
                &ScreenplayTextDocument::onActiveSceneChanged);
     disconnect(m_screenplay, &Screenplay::modelAboutToBeReset, this,
                &ScreenplayTextDocument::onScreenplayAboutToReset);
+    disconnect(m_screenplay, &Screenplay::elementOmitted, this,
+               &ScreenplayTextDocument::onSceneOmitted);
+    disconnect(m_screenplay, &Screenplay::elementIncluded, this,
+               &ScreenplayTextDocument::onSceneIncluded);
 
     for (int i = 0; i < m_screenplay->elementCount(); i++) {
         ScreenplayElement *element = m_screenplay->elementAt(i);
@@ -1888,7 +1912,8 @@ void ScreenplayTextDocument::onSceneInserted(ScreenplayElement *element, int ind
 
         const SceneElementFormat *firstParaFormat = m_formatting->elementFormat(firstParaType);
         const qreal pageWidth = m_formatting->pageLayout()->contentWidth();
-        const QTextBlockFormat blockFormat = firstParaFormat->createBlockFormat(&pageWidth);
+        const QTextBlockFormat blockFormat =
+                firstParaFormat->createBlockFormat(Qt::Alignment(), &pageWidth);
         frameFormat.setTopMargin(blockFormat.topMargin());
     }
 
@@ -1900,6 +1925,18 @@ void ScreenplayTextDocument::onSceneInserted(ScreenplayElement *element, int ind
         this->connectToSceneSignals(scene);
         this->evaluatePageBoundariesLater();
     }
+}
+
+void ScreenplayTextDocument::onSceneOmitted(ScreenplayElement *element, int index)
+{
+    this->onSceneRemoved(element, index);
+    this->onSceneInserted(element, index);
+}
+
+void ScreenplayTextDocument::onSceneIncluded(ScreenplayElement *element, int index)
+{
+    this->onSceneRemoved(element, index);
+    this->onSceneInserted(element, index);
 }
 
 void ScreenplayTextDocument::onSceneReset()
@@ -2299,14 +2336,14 @@ bool ScreenplayTextDocument::updateFromScreenplayElement(const ScreenplayElement
     QMap<SceneElement::Type, QPair<QTextCharFormat, QTextBlockFormat>> formatMap;
 
     auto applyFormattingOnCursor = [&](QTextCursor &cursor, SceneElement::Type paraType,
-                                       bool firstParagraph) {
+                                       Qt::Alignment overrideAlignment, bool firstParagraph) {
         QTextBlockFormat blockFormat;
         QTextCharFormat charFormat;
 
         if (!formatMap.contains(paraType)) {
             const qreal pageWidth = m_formatting->pageLayout()->contentWidth();
             const SceneElementFormat *format = m_formatting->elementFormat(paraType);
-            blockFormat = format->createBlockFormat(&pageWidth);
+            blockFormat = format->createBlockFormat(overrideAlignment, &pageWidth);
             charFormat = format->createCharFormat(&pageWidth);
             formatMap[paraType] = qMakePair(charFormat, blockFormat);
         } else {
@@ -2336,7 +2373,8 @@ bool ScreenplayTextDocument::updateFromScreenplayElement(const ScreenplayElement
             QTextCursor cursor(m_textDocument);
             cursor.setPosition(position);
             cursor.insertBlock();
-            applyFormattingOnCursor(cursor, para ? para->type() : SceneElement::Heading, i == 0);
+            applyFormattingOnCursor(cursor, para ? para->type() : SceneElement::Heading,
+                                    para ? para->alignment() : Qt::Alignment(), i == 0);
             block = cursor.block();
             block.setUserData(new ScreenplayParagraphBlockData(para));
         }
@@ -2359,7 +2397,7 @@ bool ScreenplayTextDocument::updateFromScreenplayElement(const ScreenplayElement
         {
             cursor.movePosition(QTextCursor::StartOfBlock);
             cursor.movePosition(QTextCursor::EndOfBlock, QTextCursor::KeepAnchor);
-            applyFormattingOnCursor(cursor, data->elementType(), i==0);
+            applyFormattingOnCursor(cursor, data->elementType(), data->element()->alignment(), i==0);
         }
 #endif
 
@@ -2392,10 +2430,10 @@ void ScreenplayTextDocument::loadScreenplayElement(const ScreenplayElement *elem
                                   // its only from the second paragraph, that we need a new block.
 
         auto prepareCursor = [=](QTextCursor &cursor, SceneElement::Type paraType,
-                                 bool firstParagraph) {
+                                 Qt::Alignment overrideAlignment, bool firstParagraph) {
             const qreal pageWidth = m_formatting->pageLayout()->contentWidth();
             const SceneElementFormat *format = m_formatting->elementFormat(paraType);
-            QTextBlockFormat blockFormat = format->createBlockFormat(&pageWidth);
+            QTextBlockFormat blockFormat = format->createBlockFormat(overrideAlignment, &pageWidth);
             QTextCharFormat charFormat = format->createCharFormat(&pageWidth);
             if (firstParagraph)
                 blockFormat.setTopMargin(0);
@@ -2404,7 +2442,8 @@ void ScreenplayTextDocument::loadScreenplayElement(const ScreenplayElement *elem
         };
 
         const SceneHeading *heading = scene->heading();
-        const bool headingEnabled = heading->isEnabled() || (m_purpose == ForDisplay);
+        const bool headingEnabled =
+                heading->isEnabled() || (m_purpose == ForDisplay) || element->isOmitted();
         if (headingEnabled) {
             if (insertBlock)
                 cursor.insertBlock();
@@ -2437,27 +2476,45 @@ void ScreenplayTextDocument::loadScreenplayElement(const ScreenplayElement *elem
                 cursor.insertText(QString(QChar::ObjectReplacementCharacter), sceneNumberFormat);
             }
 
-            prepareCursor(cursor, SceneElement::Heading, !insertBlock);
+            prepareCursor(cursor, SceneElement::Heading, Qt::Alignment(), !insertBlock);
 
-            if (m_purpose == ForPrinting) {
-                TransliterationUtils::polishFontsAndInsertTextAtCursor(cursor,
-                                                                       heading->locationType());
-                cursor.insertText(QStringLiteral(". "));
-                TransliterationUtils::polishFontsAndInsertTextAtCursor(cursor, heading->location());
-                cursor.insertText(QStringLiteral(" - "));
-                TransliterationUtils::polishFontsAndInsertTextAtCursor(cursor, heading->moment());
-            } else {
-                if (m_sceneNumbers)
-                    cursor.insertText(element->resolvedSceneNumber() + QStringLiteral(". "));
-                cursor.insertText(heading->locationType());
-                cursor.insertText(QStringLiteral(". "));
-                cursor.insertText(heading->location());
-                cursor.insertText(QStringLiteral(" - "));
-                cursor.insertText(heading->moment());
-            }
-
-            insertBlock = true;
+            if (element->isOmitted())
+                cursor.insertText(QStringLiteral("[OMITTED] "));
         }
+
+        if (!element->isOmitted()) {
+            if (m_purpose == ForPrinting) {
+                if (heading->isEnabled()) {
+                    TransliterationUtils::polishFontsAndInsertTextAtCursor(cursor,
+                                                                           heading->locationType());
+                    cursor.insertText(QStringLiteral(". "));
+                    TransliterationUtils::polishFontsAndInsertTextAtCursor(cursor,
+                                                                           heading->location());
+                    cursor.insertText(QStringLiteral(" - "));
+                    TransliterationUtils::polishFontsAndInsertTextAtCursor(cursor,
+                                                                           heading->moment());
+                } else {
+                    cursor.insertText(QStringLiteral("NO SCENE HEADING"));
+                }
+            } else {
+                if (heading->isEnabled()) {
+                    if (m_sceneNumbers)
+                        cursor.insertText(element->resolvedSceneNumber() + QStringLiteral(". "));
+                    cursor.insertText(heading->locationType());
+                    cursor.insertText(QStringLiteral(". "));
+                    cursor.insertText(heading->location());
+                    cursor.insertText(QStringLiteral(" - "));
+                    cursor.insertText(heading->moment());
+                } else {
+                    cursor.insertText(QStringLiteral("NO SCENE HEADING"));
+                }
+            }
+        }
+
+        insertBlock = true;
+
+        if (element->isOmitted())
+            return;
 
         AbstractScreenplayTextDocumentInjectionInterface *injection =
                 qobject_cast<AbstractScreenplayTextDocumentInjectionInterface *>(m_injection);
@@ -2474,7 +2531,7 @@ void ScreenplayTextDocument::loadScreenplayElement(const ScreenplayElement *elem
                 if (insertBlock)
                     cursor.insertBlock();
 
-                prepareCursor(cursor, SceneElement::Action, !insertBlock);
+                prepareCursor(cursor, SceneElement::Action, Qt::Alignment(), !insertBlock);
 
                 if (m_purpose == ForDisplay) {
                     cursor.insertHtml(QStringLiteral("<strong>Characters: </strong>"));
@@ -2590,7 +2647,7 @@ void ScreenplayTextDocument::loadScreenplayElement(const ScreenplayElement *elem
             const StructureElement *structureElement = scene->structureElement();
             const QString title = structureElement ? structureElement->nativeTitle() : QString();
 
-            QString synopsis = scene->title();
+            QString synopsis = scene->synopsis();
             synopsis = synopsis.replace(newlinesRegEx, newline);
 
             const bool includingSomething = !title.isEmpty() || !synopsis.isEmpty();
@@ -2614,7 +2671,7 @@ void ScreenplayTextDocument::loadScreenplayElement(const ScreenplayElement *elem
                 QColor sceneColor = scene->color().lighter(175);
                 sceneColor.setAlphaF(0.5);
 
-                prepareCursor(cursor, SceneElement::Heading, false);
+                prepareCursor(cursor, SceneElement::Heading, Qt::Alignment(), false);
 
                 QTextBlockFormat format;
                 format.setBackground(sceneColor);
@@ -2626,7 +2683,7 @@ void ScreenplayTextDocument::loadScreenplayElement(const ScreenplayElement *elem
             }
 
             if (!synopsis.isEmpty()) {
-                prepareCursor(cursor, SceneElement::Action, false);
+                prepareCursor(cursor, SceneElement::Action, Qt::Alignment(), false);
                 TransliterationUtils::polishFontsAndInsertTextAtCursor(cursor, synopsis);
             }
 
@@ -2656,7 +2713,7 @@ void ScreenplayTextDocument::loadScreenplayElement(const ScreenplayElement *elem
                 QTextCharFormat charFormat;
                 charFormat.setFont(cursor.document()->defaultFont());
 
-                QString synopsis = scene->title();
+                QString synopsis = scene->synopsis();
                 synopsis.replace(newlinesRegEx, newline);
 
                 cursor.insertBlock(blockFormat, charFormat);
@@ -2688,7 +2745,7 @@ void ScreenplayTextDocument::loadScreenplayElement(const ScreenplayElement *elem
 
             QTextBlock block = cursor.block();
             block.setUserData(new ScreenplayParagraphBlockData(para));
-            prepareCursor(cursor, para->type(), !insertBlock);
+            prepareCursor(cursor, para->type(), para->alignment(), !insertBlock);
 
             if (!m_highlightDialoguesOf.isEmpty()) {
                 if (para->type() == SceneElement::Character) {
@@ -2731,7 +2788,8 @@ void ScreenplayTextDocument::formatBlock(const QTextBlock &block, const QString 
 
     const qreal pageWidth = m_formatting->pageLayout()->contentWidth();
     const SceneElementFormat *format = m_formatting->elementFormat(blockData->elementType());
-    const QTextBlockFormat blockFormat = format->createBlockFormat(&pageWidth);
+    const QTextBlockFormat blockFormat =
+            format->createBlockFormat(blockData->element()->alignment(), &pageWidth);
     const QTextCharFormat charFormat = format->createCharFormat(&pageWidth);
 
     QTextCursor cursor(block);
@@ -3013,25 +3071,25 @@ void ScreenplayTitlePageObjectInterface::drawObject(QPainter *painter, const QRe
     /**
       The title page now consists of 3 frames.
 
-      In the center of the page, we will have the first frame, with the following
-               TITLE        <----- Bold
-              VERSION       <----- Normal
+       In the center of the page, we will have the first frame, with the following
+                TITLE        <----- Bold
+               VERSION       <----- Normal
 
-             Written by     <----- Normal
-              AUTHORS       <----- Normal
+               Written by     <----- Normal
+                AUTHORS       <----- Normal
 
-      In the bottom left, we will have the second frame, with the following
+       In the bottom left, we will have the second frame, with the following
 
-      COPYRIGHT OWNER
-      ADDRESS
-      PHONE
-      EMAIL
-      URL
+        COPYRIGHT OWNER
+        ADDRESS
+        PHONE
+        EMAIL
+        URL
 
-      On the bottom right, we will have the third frame with the following information
-      Written or Generated using Scrite
-      https://www.scrite.io
-      */
+       On the bottom right, we will have the third frame with the following information
+       Written or Generated using Scrite
+       https://www.scrite.io
+       */
     auto evaluateCenteredPaintRect = [=]() {
         const QTextFrameFormat rootFrameFormat = doc->rootFrame()->frameFormat();
         const qreal margin = (rootFrameFormat.rightMargin() + rootFrameFormat.leftMargin()) / 2;
@@ -3069,6 +3127,7 @@ void ScreenplayTitlePageObjectInterface::drawObject(QPainter *painter, const QRe
     const QString phoneNumber = screenplay->phoneNumber();
     const QString email = screenplay->email();
     const QString website = screenplay->website();
+    const QString logline = screenplay->logline();
     const QFont normalFont = doc->defaultFont();
 
     auto itemRect = [](const QGraphicsItem *item) {
@@ -3126,12 +3185,18 @@ void ScreenplayTitlePageObjectInterface::drawObject(QPainter *painter, const QRe
             ts << "<br/>" << subtitle;
         if (!authors.isEmpty())
             ts << "<br/><br/>" << writtenBy << "<br/>" << authors;
-
         if (!basedOn.isEmpty())
             ts << "<br/><br/>" << basedOn;
-
         if (!version.isEmpty())
             ts << "<br/><br/>" << version;
+
+        const QSettings *settings = Application::instance()->settings();
+        const bool includeTimestamp =
+                settings->value(QStringLiteral("TitlePage/includeTimestamp"), false).toBool();
+        if (includeTimestamp) {
+            ts << "<br/><br/>Generated on ";
+            ts << QDateTime::currentDateTime().toString(Qt::SystemLocaleShortDate);
+        }
 
         ts << "</center>";
     }
@@ -3148,13 +3213,14 @@ void ScreenplayTitlePageObjectInterface::drawObject(QPainter *painter, const QRe
 
     // Place contact, address, phoneNumber, email, website, marketing in a card
     // and place them on the bottom left corner
+    QGraphicsTextItem *contactCardItem = nullptr;
     QStringList contactCardFields({ contact, address, phoneNumber, email, website });
     contactCardFields.removeAll(QString());
     if (!contactCardFields.isEmpty()) {
         QString contactHtml;
         contactCardFields.prepend(QStringLiteral("Contact:"));
         contactHtml = contactCardFields.join(QStringLiteral("<br/>"));
-        QGraphicsTextItem *contactCardItem = new QGraphicsTextItem;
+        contactCardItem = new QGraphicsTextItem;
         scene.addItem(contactCardItem);
         contactCardItem->setTextWidth(sceneRect.width());
         contactCardItem->setFont(normalFont);
@@ -3163,6 +3229,61 @@ void ScreenplayTitlePageObjectInterface::drawObject(QPainter *painter, const QRe
         QRectF contactCardRect = contactCardItem->boundingRect();
         contactCardRect.moveBottomLeft(sceneRect.bottomLeft());
         contactCardItem->setPos(contactCardRect.topLeft());
+    }
+
+    // Place logline, on the title page if asked for.
+    if (!logline.isEmpty() && doc->property("#includeLoglineInTitlePage").toBool()) {
+        const qreal textWidth = sceneRect.width() * 0.9;
+        const qreal ymin = titleCardRect.bottom();
+        const qreal ymax = contactCardItem ? contactCardItem->pos().y() : sceneRect.bottom();
+        const qreal margin = (ymax - ymin) * 0.1;
+
+        QRectF loglineCardRect(0, 0, textWidth, 1);
+        loglineCardRect.moveTop(ymin + margin);
+        loglineCardRect.setBottom(ymax - margin);
+        loglineCardRect.moveCenter(QPointF(sceneRect.center().x(), (ymin + ymax) / 2));
+
+        QGraphicsRectItem *loglineCardContainer = new QGraphicsRectItem;
+        scene.addItem(loglineCardContainer);
+        loglineCardContainer->setPen(Qt::NoPen);
+        loglineCardContainer->setBrush(Qt::NoBrush);
+        loglineCardContainer->setOpacity(0.1);
+        loglineCardContainer->setFlag(QGraphicsItem::ItemClipsChildrenToShape, true);
+        loglineCardContainer->setFlag(QGraphicsItem::ItemDoesntPropagateOpacityToChildren, true);
+
+        QGraphicsTextItem *loglineCard = new QGraphicsTextItem(loglineCardContainer);
+        loglineCard->setFont(normalFont);
+        loglineCard->setTextWidth(textWidth);
+        loglineCardContainer->setPos(0, 0);
+
+        const QStringList loglineParas = logline.split(QLatin1String("\n"));
+        QString loglineHtml;
+        const QString openP = QLatin1String("<p>");
+        const QString closeP = QLatin1String("</p>");
+        for (const QString &loglinePara : qAsConst(loglineParas)) {
+            if (loglineHtml.isEmpty())
+                loglineHtml =
+                        openP + QLatin1String("<strong>Logline:</strong> ") + loglinePara + closeP;
+            else
+                loglineHtml += openP + loglinePara + closeP;
+        }
+        loglineCard->setHtml(loglineHtml);
+
+        QTextDocument *loglineDoc = loglineCard->document();
+        QTextCursor cursor(loglineDoc);
+        while (!cursor.atEnd()) {
+            QTextBlockFormat format;
+            format.setAlignment(Qt::AlignJustify);
+            cursor.mergeBlockFormat(format);
+            if (!cursor.movePosition(QTextCursor::NextBlock))
+                break;
+        }
+
+        loglineCardRect.setHeight(
+                qMin(loglineCard->boundingRect().height(), loglineCardRect.height()));
+        loglineCardContainer->setRect(
+                QRectF(0, 0, loglineCardRect.width(), loglineCardRect.height()));
+        loglineCardContainer->setPos(loglineCardRect.topLeft());
     }
 
     scene.render(painter, rectOnPage, sceneRect, Qt::IgnoreAspectRatio);

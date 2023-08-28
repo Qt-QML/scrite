@@ -18,8 +18,8 @@ import QtQuick.Window 2.15
 import Qt.labs.settings 1.0
 import QtQuick.Controls 2.15
 import QtQuick.Controls.Material 2.15
-
 import io.scrite.components 1.0
+import "../js/utils.js" as Utils
 
 Rectangle {
     // This editor has to specialize in rendering scenes within a ScreenplayAdapter
@@ -42,6 +42,11 @@ Rectangle {
 
     property alias zoomLevel: zoomSlider.zoomLevel
     property int zoomLevelModifier: 0
+
+    function zoomLevelModifierToApply() {
+        return zoomSlider.zoomLevelModifierToApply()
+    }
+
     color: primaryColors.windowColor
     clip: true
 
@@ -51,39 +56,97 @@ Rectangle {
         sourceProperty: "source"
     }
 
+    QtObject {
+        id: privateData
+
+        readonly property int _InternalSource: 0
+        readonly property int _ExternalSource: 1
+        property int currentIndexChangeSoruce: _ExternalSource
+
+        function changeCurrentIndexTo(val) {
+            currentIndexChangeSoruce = _InternalSource
+            screenplayAdapter.currentIndex = val
+            privateData.currentIndexChangeSoruce = privateData._ExternalSource
+        }
+    }
+
     Connections {
+        id: screenplayAdapterConnections
         target: screenplayAdapter
 
-        function swithToCurrentIndex() {
-            var currentIndex = screenplayAdapter.currentIndex
+        function internalSwitchToCurrentIndex() {
+            screenplayEditorBusyOverlay.reset()
+            forceContentViewPosition.stop()
+
+            const currentIndex = screenplayAdapter.currentIndex
             if(currentIndex < 0) {
                 contentView.scrollToFirstScene()
                 return
             }
 
-            var originIsContentView = mainTabBar.currentIndex === 0 || Scrite.app.hasActiveFocus(Scrite.window,contentView)
-            if(!originIsContentView) {
-                var gp = Scrite.app.cursorPosition()
-                var pos = Scrite.app.mapGlobalPositionToItem(contentView,gp)
-                originIsContentView = pos.x >= 0 && pos.x < contentView.width && pos.y >= 0 && pos.y < contentView.height
-            }
-            if(originIsContentView)
-                Scrite.app.execLater(contentView, 100, function() {
-                    contentView.scrollIntoView(currentIndex)
-                })
+            Utils.execLater(contentView, 100, function() {
+                contentView.scrollIntoView(currentIndex)
+            })
+        }
+
+        function externalSwitchToCurrentIndex() {
+            screenplayEditorBusyOverlay.ref()
+            contentView.focus = false
+
+            Utils.execLater(contentView, Scrite.app.isMacOSPlatform ? 50 : 10, () => {
+                                positionViewAtCurrentIndex()
+                                screenplayEditorBusyOverlay.reset()
+                            })
+        }
+
+        function positionViewAtCurrentIndexLater() {
+            forceContentViewPosition.start()
+        }
+
+        function positionViewAtCurrentIndex() {
+            const currentIndex = screenplayAdapter.currentIndex
+            if(currentIndex < 0)
+                contentView.scrollToFirstScene()
             else
                 contentView.positionViewAtIndex(currentIndex, ListView.Beginning)
         }
 
         function onCurrentIndexChanged(val) {
-            swithToCurrentIndex()
-            Scrite.app.execLater(screenplayEditor, 500, swithToCurrentIndex)
+            if(privateData.currentIndexChangeSoruce === privateData._InternalSource)
+                internalSwitchToCurrentIndex()
+            else
+                externalSwitchToCurrentIndex()
         }
 
         function onSourceChanged() {
             contentView.commentsExpandCounter = 0
             contentView.commentsExpanded = false
+            screenplayEditorBusyOverlay.reset()
         }
+    }
+
+    Connections {
+        id: delegateLoadedConnection
+        target: contentView
+        enabled: !contentViewIsBeingAltered.get
+        function onDelegateLoaded() {
+            screenplayAdapterConnections.positionViewAtCurrentIndexLater()
+        }
+    }
+
+    DelayedPropertyBinder {
+        id: contentViewIsBeingAltered
+        initial: false
+        set: contentView.moving || verticalScrollBar.isBeingUsed || contentView.FocusTracker.hasFocus
+        delay: 250
+    }
+
+    Timer {
+        id: forceContentViewPosition
+        running: false
+        interval: 250
+        repeat: false
+        onTriggered: screenplayAdapterConnections.positionViewAtCurrentIndex()
     }
 
     Connections {
@@ -99,7 +162,7 @@ Rectangle {
         target: screenplayAdapter.isSourceScreenplay ? Scrite.document : null
         ignoreUnknownSignals: true
         function onNewSceneCreated(scene, screenplayIndex) {
-            Scrite.app.execLater(screenplayAdapter.screenplay, 100, function() {
+            Utils.execLater(screenplayAdapter.screenplay, 100, function() {
                 contentView.positionViewAtIndex(screenplayIndex, ListView.Visible)
                 var item = contentView.loadedItemAtIndex(screenplayIndex)
                 if(mainTabBar.currentIndex === 0 || mainUndoStack.screenplayEditorActive)
@@ -291,7 +354,7 @@ Rectangle {
                         if(newCurrentIndex < 0)
                             return
                         contentView.positionViewAtIndex(newCurrentIndex, ListView.Center)
-                        Scrite.app.execLater(postSplitElementTimer, 250, function() {
+                        Utils.execLater(postSplitElementTimer, 250, function() {
                             var item = contentView.itemAtIndex(postSplitElementTimer.newCurrentIndex)
                             if(item)
                                 item.item.assumeFocus()
@@ -300,40 +363,11 @@ Rectangle {
                     }
                 }
 
-                ListView {
-                    id: contentView
-                    anchors.fill: parent
-                    model: contentViewModel.value
-                    spacing: screenplayAdapter.elementCount > 0 ? screenplayEditorSettings.spaceBetweenScenes*zoomLevel : 0
-                    property int commentsExpandCounter: 0
-                    property bool commentsExpanded: false
-                    property bool scrollingBetweenScenes: false
-                    property real spaceForComments: {
-                        if(screenplayEditorSettings.displaySceneComments && commentsPanelAllowed)
-                            return Math.round(screenplayEditorWorkspace.width - pageRulerArea.width - pageRulerArea.minLeftMargin - 20)
-                        return 0
-                    }
-                    property int commentsPanelTabIndex: screenplayEditorSettings.commentsPanelTabIndex
-                    onCommentsExpandedChanged: commentsExpandCounter = commentsExpandCounter+1
-                    FlickScrollSpeedControl.factor: workspaceSettings.flickScrollSpeedFactor
+                Component {
+                    id: contentViewHeaderComponent
 
-                    property bool allowContentYAnimation
-                    Behavior on contentY {
-                        enabled: applicationSettings.enableAnimations && contentView.allowContentYAnimation
-                        NumberAnimation {
-                            duration: 100
-                            onFinished: contentView.allowContentYAnimation = false
-                        }
-                    }
-
-                    delegate: contentViewDelegateComponent
-                    snapMode: ListView.NoSnap
-                    boundsBehavior: Flickable.StopAtBounds
-                    boundsMovement: Flickable.StopAtBounds
-                    keyNavigationEnabled: false
-                    ScrollBar.vertical: verticalScrollBar
-                    property int numberOfWordsAddedToDict : 0
-                    header: Item {
+                    Item {
+                        id: contentViewHeaderItem
                         width: contentView.width
                         height: {
                             if(!screenplayAdapter.isSourceScreenplay)
@@ -358,9 +392,17 @@ Rectangle {
                             modalDialog.active = true
                         }
 
+                        Connections {
+                            target: titleCardLoader.item
+
+                            function onEditTitlePageRequest(sourceItem) {
+                                contentViewHeaderItem.editTitlePage(sourceItem)
+                            }
+                        }
+
                         Loader {
                             id: titleCardLoader
-                            active: screenplayAdapter.isSourceScreenplay && Scrite.document.screenplay.hasTitlePageAttributes
+                            active: screenplayAdapter.isSourceScreenplay && (Scrite.document.screenplay.hasTitlePageAttributes || logLineEditor.visible || Scrite.document.screenplay.coverPagePhoto !== "")
                             sourceComponent: titleCardComponent
                             anchors.left: parent.left
                             anchors.right: parent.right
@@ -405,6 +447,16 @@ Rectangle {
                             height: logLineEditorLayout.height
                             visible: screenplayEditorSettings.showLoglineEditor && screenplayAdapter.isSourceScreenplay && (Scrite.document.readOnly ? logLineField.text !== "" : true)
 
+                            TextLimiterSyntaxHighlighterDelegate {
+                                id: loglineLimitHighlighter
+                                textLimiter: TextLimiter {
+                                    id: loglineLimiter
+                                    maxWordCount: 50
+                                    maxLetterCount: 240
+                                    countMode: TextLimiter.CountInText
+                                }
+                            }
+
                             Column {
                                 id: logLineEditorLayout
                                 width: parent.width
@@ -413,34 +465,43 @@ Rectangle {
 
                                 Text {
                                     id: logLineFieldHeading
-                                    text: "Logline:"
+                                    text: logLineField.activeFocus ? ("Logline: (" + (loglineLimiter.limitReached ? "WARNING: " : "") + loglineLimiter.wordCount + "/" + loglineLimiter.maxWordCount + " words, " +
+                                          loglineLimiter.letterCount + "/" + loglineLimiter.maxLetterCount + " letters)") : "Logline: "
                                     font.family: screenplayFormat.defaultFont2.family
                                     font.pointSize: screenplayFormat.defaultFont2.pointSize-2
                                     visible: logLineField.length > 0
-                                    color: primaryColors.a700.background
+                                    color: loglineLimiter.limitReached ? "darkred" : primaryColors.a700.background
                                 }
 
-                                TextArea {
+                                TextAreaInput {
                                     id: logLineField
                                     width: parent.width
                                     font: screenplayFormat.defaultFont2
                                     readOnly: Scrite.document.readOnly
-                                    palette: Scrite.app.palette
-                                    selectByMouse: true
-                                    selectByKeyboard: true
                                     text: Scrite.document.screenplay.logline
-                                    Transliterator.textDocument: textDocument
-                                    Transliterator.cursorPosition: cursorPosition
-                                    Transliterator.hasActiveFocus: activeFocus
-                                    Transliterator.applyLanguageFonts: screenplayEditorSettings.applyUserDefinedLanguageFonts
                                     onTextChanged: Scrite.document.screenplay.logline = text
                                     wrapMode: Text.WrapAtWordBoundaryOrAnywhere
-                                    placeholderText: "Enter the logline of your screenplay here.."
+                                    placeholderText: "Type your logline here, max " + loglineLimiter.maxWordCount + " words or " + loglineLimiter.maxLetterCount + " letters."
+                                    Component.onCompleted: Transliterator.highlighter.addDelegate(loglineLimitHighlighter)
                                 }
                             }
                         }
                     }
-                    footer: Item {
+                }
+
+                Component {
+                    id: contentViewDummyHeaderComponent
+
+                    Item {
+                        width: contentView.width
+                        height: 10 * zoomSlider.zoomLevel
+                    }
+                }
+
+                Component {
+                    id: contentViewFooterComponent
+
+                    Item {
                         width: contentView.width
                         z: 10 // So that the UiElementHightlight doesnt get clipped at the top-edge of the footer.
                         height: {
@@ -516,12 +577,90 @@ Rectangle {
                             }
                         }
                     }
+                }
+
+                Component {
+                    id: contentViewDummyFooterComponent
+
+                    Item {
+                        width: contentView.width
+                        height: contentView.height * 0.25 * zoomSlider.zoomLevel
+                    }
+                }
+
+                ListView {
+                    id: contentView
+                    anchors.fill: parent
+                    model: defaultCacheBuffer >= 0 ? contentViewModel.value : null
+                    spacing: screenplayAdapter.elementCount > 0 ? screenplayEditorSettings.spaceBetweenScenes*zoomLevel : 0
+                    property int commentsExpandCounter: 0
+                    property bool commentsExpanded: false
+                    property bool scrollingBetweenScenes: false
+                    readonly property bool loadAllDelegates: false // for future use
+                    property real spaceForComments: {
+                        if(screenplayEditorSettings.displaySceneComments && commentsPanelAllowed)
+                            return Math.round(screenplayEditorWorkspace.width - pageRulerArea.width - pageRulerArea.minLeftMargin - 20)
+                        return 0
+                    }
+                    property int commentsPanelTabIndex: screenplayEditorSettings.commentsPanelTabIndex
+                    onCommentsPanelTabIndexChanged: screenplayEditorSettings.commentsPanelTabIndex = commentsPanelTabIndex
+                    onCommentsExpandedChanged: commentsExpandCounter = commentsExpandCounter+1
+                    FlickScrollSpeedControl.factor: workspaceSettings.flickScrollSpeedFactor
+
+                    function delegateWasLoaded() { Qt.callLater(delegateLoaded) }
+                    signal delegateLoaded()
+
+                    property bool allowContentYAnimation
+                    Behavior on contentY {
+                        enabled: applicationSettings.enableAnimations && contentView.allowContentYAnimation
+                        NumberAnimation {
+                            duration: 100
+                            onFinished: contentView.allowContentYAnimation = false
+                        }
+                    }
+
+                    header: {
+                        if(screenplayEditorSettings.displayEmptyTitleCard)
+                            return contentViewHeaderComponent
+                        if(screenplayAdapter.isSourceScreenplay) {
+                            const logLineEditorVisible = screenplayEditorSettings.showLoglineEditor && (Scrite.document.readOnly ? screenplayAdapter.screenplay.logline !== "" : true)
+                            if (screenplayAdapter.screenplay.hasTitlePageAttributes || logLineEditorVisible)
+                                return contentViewHeaderComponent
+                        }
+                        return contentViewDummyHeaderComponent
+                    }
+
+                    footer: screenplayEditorSettings.displayAddSceneBreakButtons ? contentViewFooterComponent : contentViewDummyFooterComponent
+
+                    delegate: contentViewDelegateComponent
+
+                    snapMode: ListView.NoSnap
+                    boundsBehavior: Flickable.StopAtBounds
+                    boundsMovement: Flickable.StopAtBounds
+                    keyNavigationEnabled: false
+                    ScrollBar.vertical: verticalScrollBar
+                    property int numberOfWordsAddedToDict : 0
 
                     FocusTracker.window: Scrite.window
                     FocusTracker.indicator.target: mainUndoStack
                     FocusTracker.indicator.property: screenplayAdapter.isSourceScreenplay ? "screenplayEditorActive" : "sceneEditorActive"
 
-                    Component.onCompleted: positionViewAtIndex(screenplayAdapter.currentIndex, ListView.Beginning)
+                    property int defaultCacheBuffer: -1
+                    function configureCacheBuffer() {
+                        defaultCacheBuffer = cacheBuffer
+                        cacheBuffer = Qt.binding( () => {
+                                                     if(!model)
+                                                        return defaultCacheBuffer
+                                                     return (screenplayEditorSettings.optimiseScrolling || contentView.loadAllDelegates) ? 2147483647 : defaultCacheBuffer
+                                                 })
+                    }
+
+                    Component.onCompleted: {
+                        if(Scrite.app.isMacOSPlatform)
+                            flickDeceleration = 7500
+                        positionViewAtIndex(screenplayAdapter.currentIndex, ListView.Beginning)
+                        configureCacheBuffer()
+                    }
 
                     property point firstPoint: mapToItem(contentItem, width/2, 1)
                     property point lastPoint: mapToItem(contentItem, width/2, height-2)
@@ -570,7 +709,7 @@ Rectangle {
                             pos = mapToItem(contentItem, pos.x, pos.y)
                             ci = indexAt(pos.x, pos.y)
                             if(ci >= 0 && ci <= screenplayAdapter.elementCount-1)
-                                screenplayAdapter.currentIndex = ci
+                                privateData.changeCurrentIndexTo(ci)
                         }
                     }
 
@@ -663,6 +802,16 @@ Rectangle {
         orientation: Qt.Vertical
         minimumSize: 0.1
         policy: screenplayAdapter.elementCount > 0 ? ScrollBar.AlwaysOn : ScrollBar.AlwaysOff
+        property bool isBeingUsed: false
+        onPressedChanged: {
+            if(pressed)
+                isBeingUsed = true
+            else
+                Utils.execLater(verticalScrollBar, 250, () => {
+                                    privateData.changeCurrentIndexTo(contentView.lastItemIndex)
+                                    isBeingUsed = false
+                                })
+        }
     }
 
     Rectangle {
@@ -1028,6 +1177,18 @@ Rectangle {
                 screenplayFormat.fontZoomLevelIndex = value
             }
 
+            function zoomLevelModifierToApply() {
+                var zls = zoomLevels
+                var oneLevel = value
+                for(var i=0; i<zls.length; i++) {
+                    if(zls[i] === 1) {
+                        oneLevel = i
+                        break
+                    }
+                }
+                return value - oneLevel
+            }
+
             Connections {
                 target: screenplayFormat
                 function onFontZoomLevelIndexChanged() {
@@ -1184,6 +1345,12 @@ Rectangle {
         id: placeholderSceneComponent
 
         Rectangle {
+            required property int spElementIndex
+            required property var spElementData
+            required property int spElementType
+
+            property bool evaluateSuggestedSceneHeight: true
+
             border.width: 1
             border.color: screenplayElement.scene ? screenplayElement.scene.color : primaryColors.c400.background
             color: screenplayElement.scene ? Qt.tint(screenplayElement.scene.color, "#E7FFFFFF") : primaryColors.c300.background
@@ -1191,6 +1358,18 @@ Rectangle {
             readonly property ScreenplayElement screenplayElement: spElementData.screenplayElement
             readonly property Scene scene: spElementData.scene
             readonly property int screenplayElementType: spElementData.screenplayElementType
+            property real suggestedSceneHeight: screenplayElement.omitted ? (sceneHeadingText.height + sceneHeadingText.anchors.topMargin*2) : sizeHint.height
+
+            SceneSizeHintItem {
+                id: sizeHint
+                visible: false
+                asynchronous: false
+                width: contentWidth * zoomLevel
+                height: contentHeight * zoomLevel
+                format: Scrite.document.printFormat
+                scene: parent.scene
+                active: parent.evaluateSuggestedSceneHeight && !parent.screenplayElement.omitted
+            }
 
             Text {
                 font: sceneHeadingText.font
@@ -1219,7 +1398,7 @@ Rectangle {
                 elide: Text.ElideMiddle
                 text: {
                     if(scene && scene.heading.enabled)
-                        return scene.heading.text
+                        return screenplayElement.omitted ? "[OMITTED]" : scene.heading.text
                     if(screenplayElementType === ScreenplayElement.BreakElementType)
                         return screenplayElement.breakTitle
                     return "NO SCENE HEADING"
@@ -1231,11 +1410,12 @@ Rectangle {
                 anchors.right: parent.right
                 anchors.bottom: parent.bottom
                 anchors.top: sceneHeadingText.bottom
-                anchors.topMargin: 20
-                anchors.bottomMargin: 20
+                anchors.topMargin: 20 * zoomLevel
+                anchors.bottomMargin: 20 * zoomLevel
                 fillMode: Image.TileVertically
                 source: "../images/sample_scene.png"
                 opacity: 0.5
+                visible: !parent.screenplayElement.omitted
             }
         }
     }
@@ -1246,6 +1426,45 @@ Rectangle {
         Item {
             width: contentArea.width
             height: 0
+        }
+    }
+
+    Component {
+        id: omittedContentComponent
+
+        Rectangle {
+            id: omittedContentItem
+            property int theIndex: componentIndex
+            property Scene theScene: componentData.scene
+            property ScreenplayElement theElement: componentData.screenplayElement
+            property bool isCurrent: theElement === screenplayAdapter.currentElement
+            z: isCurrent ? 2 : 1
+
+            width: contentArea.width
+            height: omittedContentItemLayout.height
+            color: Scrite.app.isVeryLightColor(theScene.color) ? primaryColors.highlight.background : Qt.tint(theScene.color, "#9CFFFFFF")
+
+            Column {
+                id: omittedContentItemLayout
+                width: parent.width
+
+                Loader {
+                    id: omittedSceneHeadingAreaLoader
+                    width: parent.width
+                    active: omittedContentItem.theScene
+                    sourceComponent: sceneHeadingArea
+                    z: 1
+                    onItemChanged: {
+                        if(item) {
+                            item.theElementIndex = omittedContentItem.theIndex
+                            item.theScene = omittedContentItem.theScene
+                            item.theElement = omittedContentItem.theElement
+                        }
+                    }
+                }
+
+                // For future expansion
+            }
         }
     }
 
@@ -1286,8 +1505,11 @@ Rectangle {
                 transitions: Scrite.document.structure.transitions
                 characterNames: Scrite.document.structure.characterNames
                 screenplayFormat: screenplayEditor.screenplayFormat
+                screenplayElement: contentItem.theElement
                 forceSyncDocument: !sceneTextEditor.activeFocus
                 spellCheckEnabled: !Scrite.document.readOnly && spellCheckEnabledFlag.value
+                autoCapitalizeSentences: !Scrite.document.readOnly && screenplayEditorSettings.enableAutoCapitalizeSentences
+                autoPolishParagraphs: !Scrite.document.readOnly && screenplayEditorSettings.enableAutoPolishParagraphs
                 liveSpellCheckEnabled: sceneTextEditor.activeFocus
                 property bool firstInitializationDone: false
                 onDocumentInitialized: {
@@ -1299,6 +1521,23 @@ Rectangle {
                                              if(position >= 0)
                                                 contentItem.assumeFocusLater(position, 100)
                                          }
+
+
+                function changeCase(textCase) {
+                    const sstart = sceneTextEditor.selectionStart
+                    const send = sceneTextEditor.selectionEnd
+                    const cp = sceneTextEditor.cursorPosition
+                    changeTextCase(textCase)
+                    if(sstart >= 0 && send > 0 && send > sstart)
+                        Utils.execLater(sceneTextEditor, 150, () => {
+                                            sceneTextEditor.forceActiveFocus()
+                                            sceneTextEditor.select(sstart, send)
+                                        })
+                    else if(cp >= 0)
+                        contentItem.assumeFocusLater(cp, 100)
+
+                }
+
                 property var currentParagraphType: currentElement ? currentElement.type : SceneHeading.Action
                 applyLanguageFonts: screenplayEditorSettings.applyUserDefinedLanguageFonts
                 onCurrentParagraphTypeChanged: {
@@ -1342,10 +1581,41 @@ Rectangle {
                 property real maxTopMargin: contentItem.height-height-20
                 anchors.topMargin: screenY < 0 ? Math.min(-screenY,maxTopMargin) : -1
 
-                cornerComponent: expanded ? commentsSidePanelCornerComponent : null
+                cornerComponent: expanded ? commentsExpandedSidePanelCornerComponent : commentsCollapsedSidePanelCornerComponent
 
                 Component {
-                    id: commentsSidePanelCornerComponent
+                    id: commentsCollapsedSidePanelCornerComponent
+
+                    Item {
+                        Image {
+                            property Attachments sceneAttachments: contentItem.theScene.attachments
+                            property Attachment sceneFeaturedAttachment: sceneAttachments.featuredAttachment
+                            property Attachment sceneFeaturedImage: sceneFeaturedAttachment && sceneFeaturedAttachment.type === Attachment.Photo ? sceneFeaturedAttachment : null
+                            property string sceneComments: contentItem.theScene.comments
+                            property bool hasSceneComments: sceneComments !== ""
+                            width: Math.max((hasSceneComments ? 14 : 12), Math.min(parent.width,parent.height)-(hasSceneComments ? 6 : 10))
+                            height: width
+                            y: 2
+                            anchors.horizontalCenter: parent.horizontalCenter
+                            anchors.horizontalCenterOffset: 1.5
+                            opacity: 0.75
+                            smooth: true
+                            mipmap: true
+                            source: {
+                                if(hasSceneComments)
+                                    return "../icons/content/note.png"
+
+                                if(sceneFeaturedImage)
+                                    return "../icons/filetype/photo.png"
+
+                                return ""
+                            }
+                        }
+                    }
+                }
+
+                Component {
+                    id: commentsExpandedSidePanelCornerComponent
 
                     Column {
                         spacing: 8
@@ -1389,7 +1659,7 @@ Rectangle {
                             return contentInstance ? Math.min(contentItem.height, Math.max(contentInstance.contentHeight+60, 350)) : 300
                         return Math.min(300, parent.height)
                     }
-                    return sceneHeadingAreaLoader.height
+                    return sceneHeadingAreaLoader.height + (synopsisEditorArea.visible ? synopsisEditorArea.height : 0)
                 }
                 property bool commentsExpanded: contentView.commentsExpanded
                 expanded: commentsExpanded
@@ -1425,7 +1695,7 @@ Rectangle {
                     Component {
                         id: commentsEditComponent
 
-                        TextArea {
+                        TextAreaInput {
                             id: commentsEdit
                             background: Rectangle {
                                 color: Qt.tint(contentItem.theScene.color, "#E7FFFFFF")
@@ -1434,8 +1704,6 @@ Rectangle {
                             onTextChanged: contentItem.theScene.comments = text
                             wrapMode: Text.WordWrap
                             text: contentItem.theScene.comments
-                            selectByMouse: true
-                            selectByKeyboard: true
                             leftPadding: 10
                             rightPadding: 10
                             topPadding: 10
@@ -1443,14 +1711,10 @@ Rectangle {
                             readOnly: Scrite.document.readOnly
                             onActiveFocusChanged: {
                                 if(activeFocus)
-                                    screenplayAdapter.currentIndex = contentItem.theIndex
+                                    privateData.changeCurrentIndexTo(contentItem.theIndex)
                             }
 
-                            Transliterator.textDocument: textDocument
-                            Transliterator.cursorPosition: cursorPosition
-                            Transliterator.hasActiveFocus: activeFocus
-                            Transliterator.applyLanguageFonts: screenplayEditorSettings.applyUserDefinedLanguageFonts
-                            Transliterator.spellCheckEnabled: true
+                            Transliterator.spellCheckEnabled: screenplayEditorSettings.enableSpellCheck
 
                             SpecialSymbolsSupport {
                                 anchors.top: parent.bottom
@@ -1548,21 +1812,14 @@ Rectangle {
                             elide: Text.ElideMiddle
                         }
 
-                        TextArea {
+                        TextAreaInput {
                             id: synopsisEditorField
                             width: parent.width
                             font.pointSize: sceneHeadingFieldsFontPointSize
                             readOnly: Scrite.document.readOnly
-                            palette: Scrite.app.palette
-                            selectByMouse: true
-                            selectByKeyboard: true
-                            text: contentItem.theScene.title
-                            Transliterator.textDocument: textDocument
-                            Transliterator.cursorPosition: cursorPosition
-                            Transliterator.hasActiveFocus: activeFocus
-                            Transliterator.applyLanguageFonts: screenplayEditorSettings.applyUserDefinedLanguageFonts
-                            Transliterator.spellCheckEnabled: true
-                            onTextChanged: contentItem.theScene.title = text
+                            text: contentItem.theScene.synopsis
+                            Transliterator.spellCheckEnabled: screenplayEditorSettings.enableSpellCheck
+                            onTextChanged: contentItem.theScene.synopsis = text
                             wrapMode: Text.WrapAtWordBoundaryOrAnywhere
                             placeholderText: "Enter the synopsis of your scene here."
                             background: Item { }
@@ -1572,7 +1829,7 @@ Rectangle {
                             onActiveFocusChanged: {
                                 if(activeFocus) {
                                     contentView.ensureVisible(synopsisEditorField, Qt.rect(0, -10, cursorRectangle.width, cursorRectangle.height+20))
-                                    screenplayAdapter.currentIndex = contentItem.theIndex
+                                    privateData.changeCurrentIndexTo(contentItem.theIndex)
                                 } else
                                     Qt.callLater( function() { synopsisEditorField.cursorPosition = -1 } )
                             }
@@ -1620,6 +1877,7 @@ Rectangle {
                     property bool hasSelection: selectionStart >= 0 && selectionEnd >= 0 && selectionEnd > selectionStart
                     property Scene scene: contentItem.theScene
                     readOnly: Scrite.document.readOnly
+
                     background: Item {
                         id: sceneTextEditorBackground
 
@@ -1678,22 +1936,22 @@ Rectangle {
                     placeholderText: activeFocus ? "" : "Click here to type your scene content..."
                     onActiveFocusChanged: {
                         if(activeFocus) {
-                            completionModel.allowEnable = true
+                            completionModel.actuallyEnable = true
                             contentView.ensureVisible(sceneTextEditor, cursorRectangle)
-                            screenplayAdapter.currentIndex = contentItem.theIndex
+                            privateData.changeCurrentIndexTo(contentItem.theIndex)
                             globalScreenplayEditorToolbar.sceneEditor = contentItem
-                            textFormatTools.textFormat = sceneDocumentBinder.textFormat
+                            markupTools.sceneDocumentBinder = sceneDocumentBinder
                             justReceivedFocus = true
                         } else {
                             if(globalScreenplayEditorToolbar.sceneEditor === contentItem)
                                 globalScreenplayEditorToolbar.sceneEditor = null
-                            if(textFormatTools.textFormat === sceneDocumentBinder.textFormat)
-                                textFormatTools.textFormat = null
+                            if(markupTools.sceneDocumentBinder === sceneDocumentBinder)
+                                markupTools.sceneDocumentBinder = null
                         }
                     }
 
                     function reload() {
-                        Scrite.app.execLater(sceneDocumentBinder, 1000, function() {
+                        Utils.execLater(sceneDocumentBinder, 1000, function() {
                             sceneDocumentBinder.preserveScrollAndReload()
                         } )
                     }
@@ -1712,7 +1970,7 @@ Rectangle {
                         }
 
                         function onSceneReset(cp) {
-                            Scrite.app.execLater(sceneTextEditor, 50, () => { sceneTextEditor.keepCursorInView = true } )
+                            Utils.execLater(sceneTextEditor, 50, () => { sceneTextEditor.keepCursorInView = true } )
                             if(cursorPositionBeforeReset >= 0) {
                                 contentItem.assumeFocusLater(cursorPositionBeforeReset, 250)
                                 if(cp >= 0)
@@ -1837,7 +2095,7 @@ Rectangle {
                             // Enter, Tab and other keys must not trigger
                             // Transliteration. Only space should.
                             sceneTextEditor.userIsTyping = event.hasText
-                            completionModel.allowEnable = event.hasText
+                            completionModel.actuallyEnable = event.hasText
                             result.filter = event.controlModifier && (event.key === Qt.Key_Z || event.key === Qt.Key_Y)
                         } else if(event.key === Qt.Key_PageUp || event.key === Qt.Key_PageDown) {
                             if(event.key === Qt.Key_PageUp)
@@ -1859,10 +2117,8 @@ Rectangle {
                         contentItem.theScene.undoRedoEnabled = false
                     }
                     Transliterator.onFinishedTransliterating: {
-                        Scrite.app.execLater(Transliterator, 0, function() {
-                            contentItem.theScene.endUndoCapture()
-                            contentItem.theScene.undoRedoEnabled = true
-                        })
+                        contentItem.theScene.endUndoCapture()
+                        contentItem.theScene.undoRedoEnabled = true
                     }
 
                     // Support for auto completion
@@ -1890,27 +2146,57 @@ Rectangle {
                             enabled: !Scrite.document.readOnly
                         }
 
+                        ResetOnChange {
+                            id: completionModelEnable
+                            trackChangesOn: sceneTextEditor.cursorRectangle.y
+                            from: false
+                            to: true
+                            delay: 250
+                        }
+
+                        Connections {
+                            target: sceneDocumentBinder
+                            function onCompletionModeChanged() {
+                                completionModel.completable = false
+                                Utils.execLater(completionModel, 250, updateCompletionModel)
+                            }
+                            function updateCompletionModel() {
+                                completionModel.strings = sceneDocumentBinder.autoCompleteHints
+                                completionModel.priorityStrings = sceneDocumentBinder.priorityAutoCompleteHints
+                                completionModel.completable = sceneDocumentBinder.completionMode !== SceneDocumentBinder.NoCompletionMode
+                            }
+                        }
+
+                        BatchChange {
+                            id: completionModelCount
+                            trackChangesOn: completionModel.count
+                        }
+
                         CompletionModel {
                             id: completionModel
-                            property bool allowEnable: true
+                            property bool actuallyEnable: true
                             property string suggestion: currentCompletion
-                            property bool hasSuggestion: count > 0
-                            enabled: allowEnable && sceneTextEditor.activeFocus
-                            strings: sceneDocumentBinder.autoCompleteHints
+                            property bool hasSuggestion: completionModelCount.value > 0
+                            property bool completable: false
+                            enabled: /*allowEnable &&*/ sceneTextEditor.activeFocus && completionModelEnable.value && completable
                             sortStrings: false
+                            acceptEnglishStringsOnly: false
                             completionPrefix: sceneDocumentBinder.completionPrefix
                             filterKeyStrokes: sceneTextEditor.activeFocus
+                            maxVisibleItems: -1
                             onRequestCompletion: {
                                 sceneTextEditor.acceptCompletionSuggestion()
                                 Announcement.shout("E69D2EA0-D26D-4C60-B551-FD3B45C5BE60", contentItem.theScene.id)
                             }
                             minimumCompletionPrefixLength: 0
-                            property bool hasItems: count > 0
-                            onHasItemsChanged: {
-                                if(hasItems)
-                                    completionViewPopup.open()
-                                else
-                                    completionViewPopup.close()
+                            onHasSuggestionChanged: {
+                                if(hasSuggestion) {
+                                    if(!completionViewPopup.visible)
+                                        completionViewPopup.open()
+                                } else {
+                                    if(completionViewPopup.visible)
+                                        completionViewPopup.close()
+                                }
                             }
                         }
 
@@ -1918,27 +2204,54 @@ Rectangle {
                             id: completionViewPopup
                             x: -Scrite.app.boundingRect(completionModel.completionPrefix, defaultFontMetrics.font).width
                             y: parent.height
-                            width: Scrite.app.largestBoundingRect(completionModel.strings, defaultFontMetrics.font).width + leftInset + rightInset + leftPadding + rightPadding + 20
-                            height: completionView.contentHeight + topInset + bottomInset + topPadding + bottomPadding
+                            width: Scrite.app.largestBoundingRect(completionModel.strings, defaultFontMetrics.font).width + leftInset + rightInset + leftPadding + rightPadding + 30
+                            height: completionView.height + topInset + bottomInset + topPadding + bottomPadding
                             focus: false
                             closePolicy: Popup.NoAutoClose
+                            Connections {
+                                target: dialogUnderlay
+                                function onVisibleChanged() {
+                                    if(dialogUnderlay.visible)
+                                        completionViewPopup.close()
+                                }
+                            }
                             contentItem: ListView {
                                 id: completionView
                                 model: completionModel
+                                clip: true
                                 FlickScrollSpeedControl.factor: workspaceSettings.flickScrollSpeedFactor
-                                interactive: false
+                                height: Math.min(contentHeight, 7*(defaultFontMetrics.lineSpacing+2*5))
+                                interactive: true
+                                ScrollBar.vertical: ScrollBar2 {
+                                    flickable: completionView
+                                }
                                 delegate: Text {
-                                    width: completionView.width-1
+                                    width: completionView.width-(completionView.contentHeight > completionView.height ? 20 : 1)
                                     text: string
                                     padding: 5
                                     font: defaultFontMetrics.font
                                     color: index === completionView.currentIndex ? primaryColors.highlight.text : primaryColors.c10.text
+                                    MouseArea {
+                                        property bool singleClickAutoComplete: screenplayEditorSettings.singleClickAutoComplete
+                                        anchors.fill: parent
+                                        hoverEnabled: singleClickAutoComplete
+                                        onContainsMouseChanged: if(singleClickAutoComplete) completionModel.currentRow = index
+                                        cursorShape: singleClickAutoComplete ? Qt.PointingHandCursor : Qt.ArrowCursor
+                                        onClicked: {
+                                            if(singleClickAutoComplete || completionModel.currentRow === index)
+                                                completionModel.requestCompletion( completionModel.currentCompletion )
+                                            else
+                                                completionModel.currentRow = index
+                                        }
+                                        onDoubleClicked: completionModel.requestCompletion( completionModel.currentCompletion )
+                                    }
                                 }
+                                highlightMoveDuration: 0
+                                highlightResizeDuration: 0
                                 highlight: Rectangle {
                                     color: primaryColors.highlight.background
                                 }
                                 currentIndex: completionModel.currentRow
-                                height: contentHeight
                             }
                         }
 
@@ -1986,7 +2299,10 @@ Rectangle {
                             enabled: !Scrite.document.readOnly
                             menu: Menu2 {
                                 property int sceneTextEditorCursorPosition: -1
+                                property SceneElement sceneCurrentElement
+                                property TextFormat sceneTextFormat: sceneDocumentBinder.textFormat
                                 onAboutToShow: {
+                                    sceneCurrentElement = sceneDocumentBinder.currentElement
                                     sceneTextEditorCursorPosition = sceneTextEditor.cursorPosition
                                     sceneTextEditor.persistentSelection = true
                                 }
@@ -2054,9 +2370,9 @@ Rectangle {
                                         MenuItem2 {
                                             focusPolicy: Qt.NoFocus
                                             text: modelData.display + "\t" + Scrite.app.polishShortcutTextForDisplay("Ctrl+" + (index+1))
-                                            enabled: sceneDocumentBinder.currentElement !== null
+                                            enabled: sceneCurrentElement !== null
                                             onClicked: {
-                                                sceneDocumentBinder.currentElement.type = modelData.value
+                                                sceneCurrentElement.type = modelData.value
                                                 editorContextMenu.close()
                                             }
                                         }
@@ -2130,11 +2446,14 @@ Rectangle {
                         if(completionModel.suggestion !== "") {
                             var suggestion = completionModel.suggestion
                             userIsTyping = false
-                            remove(sceneDocumentBinder.currentBlockPosition(), cursorPosition)
+                            if(sceneDocumentBinder.hasCompletionPrefixBoundary)
+                                remove(sceneDocumentBinder.completionPrefixStart, sceneDocumentBinder.completionPrefixEnd)
+                            else
+                                remove(sceneDocumentBinder.currentBlockPosition(), cursorPosition)
                             insert(cursorPosition, suggestion)
                             userIsTyping = true
                             Transliterator.enableFromNextWord()
-                            completionModel.allowEnable = false
+                            completionModel.actuallyEnable = false
                             return true
                         }
                         return false
@@ -2303,7 +2622,7 @@ Rectangle {
 
                                 sceneTextEditor.select(selection.start, selection.end)
                                 sceneTextEditor.update()
-                                Scrite.app.execLater(textDocumentSearch, 50, scrollToSelection)
+                                Utils.execLater(textDocumentSearch, 50, scrollToSelection)
                             } else {
                                 sceneTextEditor.deselect()
                             }
@@ -2443,7 +2762,7 @@ Rectangle {
                     return
                 }
                 Scrite.document.setBusyMessage("Merging scene...")
-                Scrite.app.execLater(contentItem, 100, mergeWithPreviousSceneImpl)
+                Utils.execLater(contentItem, 100, mergeWithPreviousSceneImpl)
             }
 
             function mergeWithPreviousSceneImpl() {
@@ -2469,7 +2788,7 @@ Rectangle {
                     return
                 }
                 Scrite.document.setBusyMessage("Splitting scene...")
-                Scrite.app.execLater(contentItem, 100, splitSceneImpl)
+                Utils.execLater(contentItem, 100, splitSceneImpl)
             }
 
             function splitSceneImpl() {
@@ -2509,7 +2828,7 @@ Rectangle {
                 if(delay === 0)
                     Qt.callLater( assumeFocusAt, pos )
                 else
-                    Scrite.app.execLater(contentItem, delay, function() { contentItem.assumeFocusAt(pos) })
+                    Utils.execLater(contentItem, delay, function() { contentItem.assumeFocusAt(pos) })
             }
 
             function scrollToPreviousScene() {
@@ -2616,7 +2935,7 @@ Rectangle {
                         visible: headingItem.theElement.elementType === ScreenplayElement.SceneElementType &&
                                  headingItem.theScene.heading.enabled &&
                                  screenplayAdapter.isSourceScreenplay
-                        onActiveFocusChanged: if(activeFocus) screenplayAdapter.currentIndex = headingItem.theElementIndex
+                        onActiveFocusChanged: if(activeFocus) privateData.changeCurrentIndexTo(headingItem.theElementIndex)
                         tabItem: headingItem.sceneTextEditor
                     }
 
@@ -2660,9 +2979,21 @@ Rectangle {
                             anchors.verticalCenter: parent.verticalCenter
 
                             property SceneHeading sceneHeading: headingItem.theScene.heading
+                            function updateSceneHeading(text) {
+                                if(readOnly)
+                                    return
+                                sceneHeading.parseFrom(text)
+                            }
 
-                            text: activeFocus ? sceneHeading.editText : sceneHeading.displayText
-                            enabled: sceneHeading.enabled
+                            text: {
+                                if(headingItem.theElement.omitted)
+                                    return "[OMITTED] " + (hovered ? sceneHeading.displayText : "")
+                                if(activeFocus)
+                                    return sceneHeading.editText
+                                return sceneHeading.displayText
+                            }
+                            hoverEnabled: headingItem.theElement.omitted
+                            readOnly: Scrite.document.readOnly || !(sceneHeading.enabled && !headingItem.theElement.omitted)
                             label: ""
                             placeholderText: enabled ? "INT. SOMEPLACE - DAY" : "NO SCENE HEADING"
                             maximumLength: 140
@@ -2673,16 +3004,21 @@ Rectangle {
                             font.italic: headingFontMetrics.font.italic
                             font.letterSpacing: headingFontMetrics.font.letterSpacing
                             font.capitalization: activeFocus ? (currentLanguage === TransliterationEngine.English ? Font.AllUppercase : Font.MixedCase) : Font.AllUppercase
-                            color: headingFontMetrics.format.textColor
+                            color: headingItem.theElement.omitted ? "gray" : headingFontMetrics.format.textColor
                             wrapMode: Text.WrapAtWordBoundaryOrAnywhere
-                            readOnly: Scrite.document.readOnly
                             background: Item { }
-                            onEditingComplete: sceneHeading.parseFrom(text)
+                            onEditingComplete: updateSceneHeading(text)
+                            property int previouslyActiveLanguage: TransliterationEngine.English
                             onActiveFocusChanged: {
-                                if(activeFocus)
-                                    screenplayAdapter.currentIndex = headingItem.theElementIndex
-                                else
-                                    sceneHeading.parseFrom(text)
+                                if(activeFocus) {
+                                    privateData.changeCurrentIndexTo(headingItem.theElementIndex)
+                                    previouslyActiveLanguage = Scrite.app.transliterationEngine.language
+                                    const headingFormat = Scrite.document.displayFormat.elementFormat(SceneElement.Heading)
+                                    headingFormat.activateDefaultLanguage()
+                                } else {
+                                    updateSceneHeading(text)
+                                    Scrite.app.transliterationEngine.language = previouslyActiveLanguage
+                                }
                             }
                             tabItem: headingItem.sceneTextEditor
 
@@ -2694,6 +3030,7 @@ Rectangle {
                             property bool editingLocationTypePart: dotPosition < 0 || cursorPosition < dotPosition
                             property bool editingMomentPart: dashPosition > 0 && cursorPosition >= dashPosition
                             property bool editingLocationPart: dotPosition > 0 ? (cursorPosition >= dotPosition && (dashPosition < 0 ? true : cursorPosition < dashPosition)) : false
+                            singleClickAutoComplete: screenplayEditorSettings.singleClickAutoComplete
                             completionStrings: {
                                 if(editingLocationPart)
                                     return Scrite.document.structure.allLocations()
@@ -2794,7 +3131,9 @@ Rectangle {
 
                             Menu2 {
                                 id: sceneMenu
+
                                 MenuItem2 {
+                                    enabled: !headingItem.theElement.omitted
                                     action: Action {
                                         text: "Scene Heading"
                                         checkable: true
@@ -2817,16 +3156,17 @@ Rectangle {
                                 MarkSceneAsMenu {
                                     title: "Mark Scene As"
                                     scene: headingItem.theScene
+                                    enabled: !headingItem.theElement.omitted
                                 }
 
                                 Repeater {
-                                    model: additionalSceneMenuItems.length ? 1 : 0
+                                    model: headingItem.theElement.omitted ? 0 : additionalSceneMenuItems.length ? 1 : 0
 
                                     MenuSeparator { }
                                 }
 
                                 Repeater {
-                                    model: additionalSceneMenuItems
+                                    model: headingItem.theElement.omitted ? 0 : additionalSceneMenuItems
 
                                     MenuItem2 {
                                         text: modelData
@@ -2838,9 +3178,18 @@ Rectangle {
                                 }
 
                                 Repeater {
-                                    model: additionalSceneMenuItems.length ? 1 : 0
+                                    model: headingItem.theElement.omitted ? 0 : additionalSceneMenuItems.length ? 1 : 0
 
                                     MenuSeparator { }
+                                }
+
+                                MenuItem2 {
+                                    text: headingItem.theElement.omitted ? "Include" : "Omit"
+                                    enabled: screenplayAdapter.screenplay === Scrite.document.screenplay
+                                    onClicked: {
+                                        sceneMenu.close()
+                                        headingItem.theElement.omitted = !headingItem.theElement.omitted
+                                    }
                                 }
 
                                 MenuItem2 {
@@ -2870,7 +3219,7 @@ Rectangle {
                     property Scene scene: headingItem.theScene
                     property bool allow: true
                     active: screenplayEditorSettings.displaySceneCharacters && allow
-                    sourceComponent: sceneCharactersList
+                    sourceComponent: headingItem.theElement.omitted ? null : sceneCharactersList
 
                     Announcement.onIncoming: (type,data) => {
                         var stype = "" + type
@@ -2906,7 +3255,7 @@ Rectangle {
                             headingItem.sceneTextEditor.forceActiveFocus()
                             sceneCharactersListLoader.cursorPositionWhenNewCharacterWasAdded = curPosition
                             if(curPosition >= 0) {
-                                Scrite.app.execLater(sceneCharactersListLoader, 250, function() {
+                                Utils.execLater(sceneCharactersListLoader, 250, function() {
                                     headingItem.sceneTextEditor.cursorPosition = sceneCharactersListLoader.cursorPositionWhenNewCharacterWasAdded
                                     sceneCharactersListLoader.cursorPositionWhenNewCharacterWasAdded = -1
                                 })
@@ -2921,7 +3270,7 @@ Rectangle {
                     wrapMode: Text.WrapAtWordBoundaryOrAnywhere
                     font.pointSize: sceneHeadingFieldsFontPointSize
                     text: sceneCharactersListLoader.active ? Scrite.document.structure.presentableGroupNames(headingItem.theScene.groups) : ""
-                    visible: sceneCharactersListLoader.active && headingItem.theScene.groups.length > 0
+                    visible: !headingItem.theElement.omitted && sceneCharactersListLoader.active && headingItem.theScene.groups.length > 0
                     topPadding: 5*Math.min(zoomLevel,1)
                     bottomPadding: 5*Math.min(zoomLevel,1)
                     font.underline: sceneGroupTagsTextMouseArea.containsMouse && !sceneTagMenuLoader.active
@@ -2938,7 +3287,7 @@ Rectangle {
                 Item {
                     width: parent.width
                     height: 10*Math.min(zoomLevel,1)
-                    visible: !screenplayEditorSettings.displaySceneSynopsis
+                    visible: !headingItem.theElement.omitted && !screenplayEditorSettings.displaySceneSynopsis
                 }
             }
         }
@@ -3154,7 +3503,7 @@ Rectangle {
                     keyNavigationEnabled: false
                     preferredHighlightEnd: height*0.8
                     preferredHighlightBegin: height*0.2
-                    highlightRangeMode: ListView.ApplyRange
+                    highlightRangeMode: ListView.NoHighlightRange
                     property bool hasEpisodes: screenplayAdapter.isSourceScreenplay ? screenplayAdapter.screenplay.episodeCount > 0 : false
 
                     FocusTracker.window: Scrite.window
@@ -3258,10 +3607,16 @@ Rectangle {
                             color: primaryColors.c10.text
                             font.capitalization: parent.elementIsBreak ? Font.MixedCase : Font.AllUppercase
                             text: {
-                                if(scene && scene.heading.enabled)
-                                    return screenplayElement.resolvedSceneNumber + ". " + scene.heading.text
+                                var ret = ""
+                                if(scene && scene.heading.enabled) {
+                                    ret = screenplayElement.resolvedSceneNumber + ". "
+                                    if(screenplayElement.omitted)
+                                        ret += "[OMITTED] <font color=\"gray\">" + scene.heading.text + "</font>"
+                                    else
+                                        ret += scene.heading.text
+                                    return ret
+                                }
                                 if(parent.elementIsBreak) {
-                                    var ret = ""
                                     if(parent.elementIsEpisodeBreak)
                                         ret = screenplayElement.breakTitle
                                     else if(sceneListView.hasEpisodes)
@@ -3287,7 +3642,7 @@ Rectangle {
                             onDoubleClicked: (mouse) => {
                                                  screenplayAdapter.screenplay.clearSelection()
                                                  screenplayElement.toggleSelection()
-                                                 navigateToScreenplayElement()
+                                                 screenplayAdapter.currentIndex = index
                                                  sceneListSidePanel.expanded = false
                                              }
                             onClicked: (mouse) => {
@@ -3301,8 +3656,6 @@ Rectangle {
                                                }
 
                                                Scrite.document.screenplay.currentElementIndex = index
-                                               requestEditorLater()
-
                                                return
                                            }
 
@@ -3330,16 +3683,10 @@ Rectangle {
                                                }
                                            }
 
-                                           navigateToScreenplayElement()
-                                           Scrite.app.execLater(delegateMouseArea, 500, navigateToScreenplayElement)
+                                           screenplayAdapter.currentIndex = index
                                        }
                             drag.target: screenplayAdapter.isSourceScreenplay && !Scrite.document.readOnly ? parent : null
                             drag.axis: Drag.YAxis
-
-                            function navigateToScreenplayElement() {
-                                contentView.positionViewAtIndex(index, ListView.Beginning)
-                                screenplayAdapter.currentIndex = index
-                            }
                         }
 
                         Drag.active: delegateMouseArea.drag.active
@@ -3460,7 +3807,7 @@ Rectangle {
                                 moveSelectedElementsAnimation.draggedElement = null
 
                                 contentView.positionViewAtIndex(targetndex, ListView.Beginning)
-                                screenplayAdapter.currentIndex = targetndex
+                                privateData.changeCurrentIndexTo(targetndex)
 
                                 sceneListView.forceActiveFocus()
                             }
@@ -3632,6 +3979,8 @@ Rectangle {
             readonly property real rightPadding: leftPadding
             height: titleCardContents.height
 
+            signal editTitlePageRequest(Item sourceItem)
+
             Column {
                 id: titleCardContents
                 spacing: 10 * zoomLevel
@@ -3643,6 +3992,8 @@ Rectangle {
                 Item { width: parent.width; height: 35 * zoomLevel }
 
                 Image {
+                    id: coverPicImage
+
                     width: {
                         switch(Scrite.document.screenplay.coverPagePhotoSize) {
                         case Screenplay.SmallCoverPhoto:
@@ -3653,33 +4004,56 @@ Rectangle {
                         return parent.width
                     }
 
+                    cache: false
                     source: visible ? "file:///" + Scrite.document.screenplay.coverPagePhoto : ""
                     visible: Scrite.document.screenplay.coverPagePhoto !== ""
-                    smooth: true; mipmap: true
+                    smooth: true; mipmap: true; asynchronous: true
                     fillMode: Image.PreserveAspectFit
                     anchors.horizontalCenter: parent.horizontalCenter
+
+                    Rectangle {
+                        anchors.fill: parent
+                        anchors.margins: -border.width - 4
+                        color: Qt.rgba(1,1,1,0.1)
+                        border { width: 2; color: titleLink.hoverColor }
+                        visible: coverPicMouseArea.containsMouse
+                    }
+
+                    MouseArea {
+                        id: coverPicMouseArea
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: editTitlePageRequest(coverPicMouseArea)
+                    }
                 }
 
                 Item { width: parent.width; height: Scrite.document.screenplay.coverPagePhoto !== "" ? 20 * zoomLevel : 0 }
 
-                Text {
+                Link {
+                    id: titleLink
                     font.family: Scrite.document.formatting.defaultFont.family
                     font.pointSize: defaultFontSize + 2
+                    font.underline: containsMouse
                     font.bold: true
                     width: parent.width
                     wrapMode: Text.WrapAtWordBoundaryOrAnywhere
                     horizontalAlignment: Text.AlignHCenter
                     text: Scrite.document.screenplay.title === "" ? "<untitled>" : Scrite.document.screenplay.title
+                    onClicked: editTitlePageRequest(titleLink)
                 }
 
-                Text {
+                Link {
+                    id: subtitleLink
                     font.family: Scrite.document.formatting.defaultFont.family
                     font.pointSize: defaultFontSize
+                    font.underline: containsMouse
                     width: parent.width
                     wrapMode: Text.WrapAtWordBoundaryOrAnywhere
                     horizontalAlignment: Text.AlignHCenter
                     text: Scrite.document.screenplay.subtitle
                     visible: Scrite.document.screenplay.subtitle !== ""
+                    onClicked: editTitlePageRequest(subtitleLink)
                 }
 
                 Column {
@@ -3695,33 +4069,42 @@ Rectangle {
                         text: "Written By"
                     }
 
-                    Text {
+                    Link {
+                        id: authorsLink
                         font.family: Scrite.document.formatting.defaultFont.family
                         font.pointSize: defaultFontSize
+                        font.underline: containsMouse
                         width: parent.width
                         wrapMode: Text.WrapAtWordBoundaryOrAnywhere
                         horizontalAlignment: Text.AlignHCenter
                         text: (Scrite.document.screenplay.author === "" ? "<unknown author>" : Scrite.document.screenplay.author)
+                        onClicked: editTitlePageRequest(authorsLink)
                     }
                 }
 
-                Text {
+                Link {
+                    id: versionLink
                     font.family: Scrite.document.formatting.defaultFont.family
                     font.pointSize: defaultFontSize
+                    font.underline: containsMouse
                     width: parent.width
                     wrapMode: Text.WrapAtWordBoundaryOrAnywhere
                     horizontalAlignment: Text.AlignHCenter
                     text: Scrite.document.screenplay.version
+                    onClicked: editTitlePageRequest(versionLink)
                 }
 
-                Text {
+                Link {
+                    id: basedOnLink
                     font.family: Scrite.document.formatting.defaultFont.family
                     font.pointSize: defaultFontSize
+                    font.underline: containsMouse
                     width: parent.width
                     wrapMode: Text.WrapAtWordBoundaryOrAnywhere
                     horizontalAlignment: Text.AlignHCenter
                     text: Scrite.document.screenplay.basedOn
                     visible: Scrite.document.screenplay.basedOn !== ""
+                    onClicked: editTitlePageRequest(basedOnLink)
                 }
 
                 Column {
@@ -3734,65 +4117,64 @@ Rectangle {
                         height: 20 * zoomLevel
                     }
 
-                    Text {
+                    Link {
+                        id: contactLink
                         font.family: Scrite.document.formatting.defaultFont.family
                         font.pointSize: defaultFontSize - 2
+                        font.underline: containsMouse
                         width: parent.width
                         wrapMode: Text.WrapAtWordBoundaryOrAnywhere
                         text: Scrite.document.screenplay.contact
                         visible: text !== ""
+                        onClicked: editTitlePageRequest(contactLink)
                     }
 
-                    Text {
+                    Link {
+                        id: addressLink
                         font.family: Scrite.document.formatting.defaultFont.family
                         font.pointSize: defaultFontSize - 2
+                        font.underline: containsMouse
                         width: parent.width
                         wrapMode: Text.WrapAtWordBoundaryOrAnywhere
                         text: Scrite.document.screenplay.address
                         visible: text !== ""
+                        onClicked: editTitlePageRequest(addressLink)
                     }
 
-                    Text {
+                    Link {
+                        id: phoneNumberLink
                         font.family: Scrite.document.formatting.defaultFont.family
                         font.pointSize: defaultFontSize - 2
+                        font.underline: containsMouse
                         width: parent.width
                         wrapMode: Text.WrapAtWordBoundaryOrAnywhere
                         text: Scrite.document.screenplay.phoneNumber
                         visible: text !== ""
+                        onClicked: editTitlePageRequest(phoneNumberLink)
                     }
 
-                    Text {
+                    Link {
                         font.family: Scrite.document.formatting.defaultFont.family
                         font.pointSize: defaultFontSize - 2
-                        font.underline: true
+                        font.underline: containsMouse
                         color: "blue"
                         width: parent.width
                         wrapMode: Text.WrapAtWordBoundaryOrAnywhere
                         text: Scrite.document.screenplay.email
                         visible: text !== ""
-
-                        MouseArea {
-                            anchors.fill: parent
-                            onClicked: Qt.openUrlExternally("mailto:" + parent.text)
-                            cursorShape: Qt.PointingHandCursor
-                        }
+                        onClicked: Qt.openUrlExternally("mailto:" + text)
                     }
 
-                    Text {
+                    Link {
                         font.family: Scrite.document.formatting.defaultFont.family
                         font.pointSize: defaultFontSize - 2
-                        font.underline: true
+                        font.underline: containsMouse
                         color: "blue"
                         width: parent.width
                         elide: Text.ElideRight
                         text: Scrite.document.screenplay.website
                         visible: text !== ""
-
-                        MouseArea {
-                            anchors.fill: parent
-                            onClicked: Qt.openUrlExternally(parent.text)
-                            cursorShape: Qt.PointingHandCursor
-                        }
+                        onClicked: Qt.openUrlExternally(text)
                     }
                 }
 
@@ -3877,7 +4259,24 @@ Rectangle {
             }
 
             active: false
-            sourceComponent: componentData ? (componentData.scene ? contentComponent : (componentData.breakType === Screenplay.Episode ? episodeBreakComponent : actBreakComponent)) : noContentComponent
+            onActiveChanged: Scrite.app.resetObjectProperty(contentViewDelegateLoader, "height")
+            sourceComponent: {
+                if(componentData) {
+                    if(componentData.scene)
+                        return componentData.screenplayElement.omitted ? omittedContentComponent : contentComponent
+                    if(componentData.breakType === Screenplay.Episode)
+                        return episodeBreakComponent
+                    return actBreakComponent
+                }
+                return noContentComponent
+            }
+            onLoaded: {
+                contentView.delegateWasLoaded()
+                Qt.callLater(updateHeightHint)
+                if(placeHolderSceneItem)
+                    placeHolderSceneItem.destroy()
+            }
+            onHeightChanged: Qt.callLater(updateHeightHint)
 
             // Background for episode and act break components, when "Scene Blocks" is enabled.
             Rectangle {
@@ -3894,62 +4293,64 @@ Rectangle {
                 opacity: componentData.scene ? 0.25 : 1
             }
 
-            // Placeholder item for when scrolling is rapid.
-            Loader {
-                anchors.fill: parent
-                readonly property int spElementIndex: componentIndex
-                readonly property var spElementData: componentData
-                readonly property int spElementType: screenplayElementType
-
-                active: componentData.scene && !parent.active
-                sourceComponent: placeholderSceneComponent
-            }
-
+            property Item placeHolderSceneItem
             property bool initialized: false
             property bool isVisibleToUser: !contentView.moving && initialized && (index >= contentView.firstItemIndex && index <= contentView.lastItemIndex) && !contentView.ScrollBar.vertical.active
             onIsVisibleToUserChanged: {
                 if(!active && isVisibleToUser)
-                    Scrite.app.execLater(contentViewDelegateLoader, 100, load)
+                    Utils.execLater(contentViewDelegateLoader, 100, load)
             }
 
             function load() {
                 if(active || componentData === undefined)
                     return
+
+                contentView.movingChanged.disconnect(load)
                 if(contentView.moving)
                     contentView.movingChanged.connect(load)
-                else {
+                else
                     active = true
-                    Scrite.app.resetObjectProperty(contentViewDelegateLoader, "height")
-                }
             }
 
             Component.onCompleted: {
-                var editorHints = componentData.screenplayElement.editorHints
+                const heightHint = componentData.screenplayElement.heightHint
                 if( componentData.screenplayElementType === ScreenplayElement.BreakElementType ||
-                    !editorHints ||
-                    editorHints.displaySceneCharacters !== screenplayEditorSettings.displaySceneCharacters ||
-                    editorHints.displaySceneSynopsis !== screenplayEditorSettings.displaySceneSynopsis ||
+                    contentView.loadAllDelegates || screenplayEditorSettings.optimiseScrolling ||
                     componentData.scene.elementCount <= 1) {
                         active = true
                         initialized = true
                         return
                     }
 
-                height = editorHints.height * zoomLevel
+                const placeHolderSceneProps = {
+                    "spElementIndex": componentIndex,
+                    "spElementData": componentData,
+                    "spElementType": screenplayElementType,
+                    "evaluateSuggestedSceneHeight": heightHint === 0
+                };
+                placeHolderSceneItem = placeholderSceneComponent.createObject(contentViewDelegateLoader, placeHolderSceneProps)
+                placeHolderSceneItem.anchors.fill = contentViewDelegateLoader
+
+                if(heightHint === 0)
+                    height = Qt.binding( () => { return placeHolderSceneItem.suggestedSceneHeight } )
+                else
+                    height = heightHint * zoomLevel
+
                 active = false
                 initialized = true
-                Scrite.app.execLater(contentViewDelegateLoader, 400, load)
+                Utils.execLater(contentViewDelegateLoader, 100, () => { contentViewDelegateLoader.load() } )
             }
 
             Component.onDestruction: {
                 if(!active || componentData.screenplayElementType === ScreenplayElement.BreakElementType)
                     return
-                var editorHints = {
-                    "height": height / zoomLevel,
-                    "displaySceneCharacters": screenplayEditorSettings.displaySceneCharacters,
-                    "displaySceneSynopsis": screenplayEditorSettings.displaySceneSynopsis
-                }
-                componentData.screenplayElement.editorHints = editorHints
+
+                updateHeightHint()
+            }
+
+            function updateHeightHint() {
+                if(zoomLevel > 0 && active)
+                    componentData.screenplayElement.heightHint = height / zoomLevel
             }
 
             /*
@@ -3964,37 +4365,40 @@ Rectangle {
     }
 
     DockWidget {
-        id: textFormatTools
-        property TextFormat textFormat
+        id: markupTools
+        property SceneDocumentBinder sceneDocumentBinder
+        property TextFormat textFormat: sceneDocumentBinder ? sceneDocumentBinder.textFormat : null
+        property SceneElement sceneElement: sceneDocumentBinder ? sceneDocumentBinder.currentElement : null
         contentX: 20
         contentY: 20
         contentPadding: 20
-        contentWidth: 280
-        contentHeight: 84
-        title: "Text Formatting"
+        contentWidth: 426
+        contentHeight: 70
+        titleBarHeight: 32
+        title: "Markup Tools"
         anchors.fill: parent
         closable: true
         visible: false
-        onCloseRequest: screenplayEditorSettings.textFormatDockVisible = false
+        onCloseRequest: screenplayEditorSettings.markupToolsDockVisible = false
 
         function adjustCoordinates() {
-            const cx = textFormatToolsSettings.contentX
-            const cy = textFormatToolsSettings.contentY
+            const cx = markupToolsSettings.contentX
+            const cy = markupToolsSettings.contentY
             contentX = Math.round(Math.min(Math.max(20, cx), parent.width-contentWidth-20))
             contentY = Math.round(Math.min(Math.max(20, cy), parent.height-contentHeight-20))
-            visible = Qt.binding( () => { return screenplayEditorSettings.textFormatDockVisible } )
+            visible = Qt.binding( () => { return screenplayEditorSettings.markupToolsDockVisible } )
         }
 
-        Component.onCompleted: Scrite.app.execLater(textFormatTools, 200, adjustCoordinates)
+        Component.onCompleted: Utils.execLater(markupTools, 200, adjustCoordinates)
         Component.onDestruction: {
-            textFormatToolsSettings.contentX = Math.round(contentX)
-            textFormatToolsSettings.contentY = Math.round(contentY)
+            markupToolsSettings.contentX = Math.round(contentX)
+            markupToolsSettings.contentY = Math.round(contentY)
         }
 
         Settings {
-            id: textFormatToolsSettings
+            id: markupToolsSettings
             fileName: Scrite.app.settingsFilePath
-            category: "Text Formatting Tools"
+            category: "Markup Tools"
             property real contentX: 20
             property real contentY: 20
         }
@@ -4002,34 +4406,56 @@ Rectangle {
         Shortcut {
             sequence: "Ctrl+B"
             context: Qt.ApplicationShortcut
-            enabled: textFormatTools.textFormat
+            enabled: markupTools.textFormat
             ShortcutsModelItem.title: "Bold"
             ShortcutsModelItem.shortcut: sequence
-            ShortcutsModelItem.group: "Text Formatting"
+            ShortcutsModelItem.group: "Markup Tools"
             ShortcutsModelItem.enabled: enabled
-            onActivated: textFormatTools.textFormat.toggleBold()
+            onActivated: markupTools.textFormat.toggleBold()
         }
 
         Shortcut {
             sequence: "Ctrl+I"
             context: Qt.ApplicationShortcut
-            enabled: textFormatTools.textFormat
+            enabled: markupTools.textFormat
             ShortcutsModelItem.title: "Italics"
             ShortcutsModelItem.shortcut: sequence
-            ShortcutsModelItem.group: "Text Formatting"
+            ShortcutsModelItem.group: "Markup Tools"
             ShortcutsModelItem.enabled: enabled
-            onActivated: textFormatTools.textFormat.toggleItalics()
+            onActivated: markupTools.textFormat.toggleItalics()
         }
 
         Shortcut {
             sequence: "Ctrl+U"
             context: Qt.ApplicationShortcut
-            enabled: textFormatTools.textFormat
+            enabled: markupTools.textFormat
             ShortcutsModelItem.title: "Underline"
             ShortcutsModelItem.shortcut: sequence
-            ShortcutsModelItem.group: "Text Formatting"
+            ShortcutsModelItem.group: "Markup Tools"
             ShortcutsModelItem.enabled: enabled
-            onActivated: textFormatTools.textFormat.toggleUnderline()
+            onActivated: markupTools.textFormat.toggleUnderline()
+        }
+
+        Shortcut {
+            sequence: "Shift+F3"
+            context: Qt.ApplicationShortcut
+            enabled: markupTools.sceneDocumentBinder
+            ShortcutsModelItem.title: "All CAPS"
+            ShortcutsModelItem.shortcut: sequence
+            ShortcutsModelItem.group: "Markup Tools"
+            ShortcutsModelItem.enabled: enabled
+            onActivated: markupTools.sceneDocumentBinder.changeCase(SceneDocumentBinder.UpperCase)
+        }
+
+        Shortcut {
+            sequence: "Ctrl+Shift+F3"
+            context: Qt.ApplicationShortcut
+            enabled: markupTools.sceneDocumentBinder
+            ShortcutsModelItem.title: "All small"
+            ShortcutsModelItem.shortcut: sequence
+            ShortcutsModelItem.group: "Markup Tools"
+            ShortcutsModelItem.enabled: enabled
+            onActivated: markupTools.sceneDocumentBinder.changeCase(SceneDocumentBinder.LowerCase)
         }
 
         content: Rectangle {
@@ -4038,91 +4464,100 @@ Rectangle {
             Row {
                 id: toolsLayout
                 anchors.centerIn: parent
-                enabled: textFormatTools.textFormat
-                opacity: enabled ? 1 : 0.5
-                spacing: 4
-                height: 55
+                spacing: 2
+                height: 48
+                enabled: !Scrite.document.readOnly
 
                 SimpleToolButton {
                     iconSource: "../icons/editor/format_bold.png"
-                    checked: textFormatTools.textFormat ? textFormatTools.textFormat.bold : false
-                    onClicked: if(textFormatTools.textFormat) textFormatTools.textFormat.toggleBold()
+                    enabled: markupTools.textFormat
+                    checked: markupTools.textFormat ? markupTools.textFormat.bold : false
+                    onClicked: if(markupTools.textFormat) markupTools.textFormat.toggleBold()
                     anchors.verticalCenter: parent.verticalCenter
+                    hoverEnabled: true
+                    ToolTip.visible: containsMouse
+                    ToolTip.text: "Bold\t" + Scrite.app.polishShortcutTextForDisplay("Ctrl+B")
                 }
 
                 SimpleToolButton {
                     iconSource: "../icons/editor/format_italics.png"
-                    checked: textFormatTools.textFormat ? textFormatTools.textFormat.italics : false
-                    onClicked: if(textFormatTools.textFormat) textFormatTools.textFormat.toggleItalics()
+                    checked: markupTools.textFormat ? markupTools.textFormat.italics : false
+                    enabled: markupTools.textFormat
+                    onClicked: if(markupTools.textFormat) markupTools.textFormat.toggleItalics()
                     anchors.verticalCenter: parent.verticalCenter
+                    hoverEnabled: true
+                    ToolTip.visible: containsMouse
+                    ToolTip.text: "Italics\t" + Scrite.app.polishShortcutTextForDisplay("Ctrl+I")
                 }
 
                 SimpleToolButton {
                     iconSource: "../icons/editor/format_underline.png"
-                    checked: textFormatTools.textFormat ? textFormatTools.textFormat.underline : false
-                    onClicked: if(textFormatTools.textFormat) textFormatTools.textFormat.toggleUnderline()
+                    checked: markupTools.textFormat ? markupTools.textFormat.underline : false
+                    enabled: markupTools.textFormat
+                    onClicked: if(markupTools.textFormat) markupTools.textFormat.toggleUnderline()
                     anchors.verticalCenter: parent.verticalCenter
+                    hoverEnabled: true
+                    ToolTip.visible: containsMouse
+                    ToolTip.text: "Underline\t" + Scrite.app.polishShortcutTextForDisplay("Ctrl+U")
                 }
 
                 ColorButton {
                     id: textColorButton
-                    width: 42
-                    height: 30
                     anchors.verticalCenter: parent.verticalCenter
-                    selectedColor: textFormatTools.textFormat ? textFormatTools.textFormat.textColor : transparent
+                    selectedColor: markupTools.textFormat ? markupTools.textFormat.textColor : transparentColor
+                    enabled: markupTools.textFormat
                     hoverEnabled: true
                     ToolTip.visible: containsMouse
                     ToolTip.text: "Text Color"
                     onColorPicked: (newColor) => {
-                                       if(textFormatTools.textFormat)
-                                            textFormatTools.textFormat.textColor = newColor
+                                       if(markupTools.textFormat)
+                                            markupTools.textFormat.textColor = newColor
                                    }
 
                     Rectangle {
                         color: "white"
-                        width: Math.min(parent.width,parent.height)
+                        width: Math.min(parent.width,parent.height) * 0.8
                         height: width
                         anchors.centerIn: parent
 
                         Text {
                             anchors.centerIn: parent
-                            font.pixelSize: parent.height * 0.85
+                            font.pixelSize: parent.height * 0.70
                             font.bold: true
                             font.underline: true
                             text: "A"
-                            color: textColorButton.selectedColor === transparent ? "black" : textColorButton.selectedColor
+                            color: textColorButton.selectedColor === transparentColor ? "black" : textColorButton.selectedColor
                         }
                     }
                 }
 
                 ColorButton {
                     id: bgColorButton
-                    width: 42
-                    height: 30
                     anchors.verticalCenter: parent.verticalCenter
-                    selectedColor: textFormatTools.textFormat ? textFormatTools.textFormat.backgroundColor : transparent
+                    selectedColor: markupTools.textFormat ? markupTools.textFormat.backgroundColor : transparentColor
+                    enabled: markupTools.textFormat
                     hoverEnabled: true
                     ToolTip.visible: containsMouse
                     ToolTip.text: "Background Color"
                     onColorPicked: (newColor) => {
-                                       if(textFormatTools.textFormat)
-                                            textFormatTools.textFormat.backgroundColor = newColor
+                                       if(markupTools.textFormat)
+                                            markupTools.textFormat.backgroundColor = newColor
                                    }
 
                     Rectangle {
                         border.width: 1
                         border.color: "black"
-                        color: bgColorButton.selectedColor === transparent ? "white" : bgColorButton.selectedColor
-                        width: Math.min(parent.width,parent.height)
+                        color: bgColorButton.selectedColor === transparentColor ? "white" : bgColorButton.selectedColor
+                        width: Math.min(parent.width,parent.height) * 0.8
                         height: width
                         anchors.centerIn: parent
 
                         Text {
                             anchors.centerIn: parent
-                            font.pixelSize: parent.height * 0.85
+                            font.pixelSize: parent.height * 0.70
                             font.bold: true
                             text: "A"
-                            color: "black"
+                            color: textColorButton.selectedColor === transparentColor ? "black" : textColorButton.selectedColor
                         }
                     }
                 }
@@ -4130,25 +4565,96 @@ Rectangle {
                 SimpleToolButton {
                     iconSource: "../icons/editor/format_clear.png"
                     checked: false
-                    onClicked: if(textFormatTools.textFormat) textFormatTools.textFormat.reset()
+                    enabled: markupTools.textFormat
+                    onClicked: if(markupTools.textFormat) markupTools.textFormat.reset()
                     anchors.verticalCenter: parent.verticalCenter
                     hoverEnabled: true
                     ToolTip.visible: containsMouse
                     ToolTip.text: "Clear formatting"
                 }
+
+                Rectangle {
+                    width: 1
+                    height: parent.height
+                    color: primaryColors.borderColor
+                }
+
+                SimpleToolButton {
+                    iconSource: "../icons/editor/format_align_left.png"
+                    checked: enabled ? markupTools.sceneElement.alignment === Qt.AlignLeft : false
+                    enabled: markupTools.sceneElement && markupTools.sceneElement.type === SceneElement.Action
+                    anchors.verticalCenter: parent.verticalCenter
+                    onClicked: markupTools.sceneElement.alignment = markupTools.sceneElement.alignment === Qt.AlignLeft ? 0 : Qt.AlignLeft
+                }
+
+                SimpleToolButton {
+                    iconSource: "../icons/editor/format_align_center.png"
+                    checked: enabled ? markupTools.sceneElement.alignment === Qt.AlignHCenter : false
+                    enabled: markupTools.sceneElement && markupTools.sceneElement.type === SceneElement.Action
+                    anchors.verticalCenter: parent.verticalCenter
+                    onClicked: markupTools.sceneElement.alignment = markupTools.sceneElement.alignment === Qt.AlignHCenter ? 0 : Qt.AlignHCenter
+                }
+
+                SimpleToolButton {
+                    iconSource: "../icons/editor/format_align_right.png"
+                    checked: enabled ? markupTools.sceneElement.alignment === Qt.AlignRight : false
+                    enabled: markupTools.sceneElement && markupTools.sceneElement.type === SceneElement.Action
+                    anchors.verticalCenter: parent.verticalCenter
+                    onClicked: markupTools.sceneElement.alignment = markupTools.sceneElement.alignment === Qt.AlignRight ? 0 : Qt.AlignRight
+                }
+
+                Rectangle {
+                    width: 1
+                    height: parent.height
+                    color: primaryColors.borderColor
+                }
+
+                SimpleToolButton {
+                    anchors.verticalCenter: parent.verticalCenter
+                    enabled: markupTools.sceneDocumentBinder
+                    onClicked: markupTools.sceneDocumentBinder.changeCase(SceneDocumentBinder.UpperCase)
+                    hoverEnabled: true
+                    ToolTip.visible: containsMouse
+                    ToolTip.text: "All CAPS\t" + Scrite.app.polishShortcutTextForDisplay("Shift+F3")
+
+                    Text {
+                        anchors.centerIn: parent
+                        font.pixelSize: parent.height*0.5
+                        text: "AB"
+                    }
+                }
+
+                SimpleToolButton {
+                    anchors.verticalCenter: parent.verticalCenter
+                    enabled: markupTools.sceneDocumentBinder
+                    onClicked: markupTools.sceneDocumentBinder.changeCase(SceneDocumentBinder.LowerCase)
+                    hoverEnabled: true
+                    ToolTip.visible: containsMouse
+                    ToolTip.text: "All small\t" + Scrite.app.polishShortcutTextForDisplay("Ctrl+Shift+F3")
+
+                    Text {
+                        anchors.centerIn: parent
+                        font.pixelSize: parent.height*0.5
+                        text: "ab"
+                    }
+                }
             }
         }
     }
 
-    readonly property color transparent: "transparent"
+    readonly property color transparentColor: "transparent"
+    readonly property var availableColors: ["#e60000", "#ff9900", "#ffff00", "#008a00", "#0066cc", "#9933ff", "#ffffff", "#facccc", "#ffebcc", "#ffffcc", "#cce8cc", "#cce0f5", "#ebd6ff", "#bbbbbb", "#f06666", "#ffc266", "#ffff66", "#66b966", "#66a3e0", "#c285ff", "#888888", "#a10000", "#b26b00", "#b2b200", "#006100", "#0047b2", "#6b24b2", "#444444", "#5c0000", "#663d00", "#666600", "#003700", "#002966", "#3d1466"]
 
     component SimpleToolButton : Rectangle {
-        width: 42
-        height: 42
-        radius: 6
-        color: tbMouseArea.pressed ? primaryColors.button.background : (checked ? primaryColors.highlight.background : Qt.rgba(0,0,0,0))
+        width: 36
+        height: 36
+        radius: 4
+        color: tbMouseArea.pressed || down ? primaryColors.button.background : (checked ? primaryColors.highlight.background : Qt.rgba(0,0,0,0))
+        opacity: enabled ? 1 : 0.5
 
+        property bool down: false
         property bool checked: false
+        property alias pressed: tbMouseArea.pressed
         property alias hoverEnabled: tbMouseArea.hoverEnabled
         property alias containsMouse: tbMouseArea.containsMouse
         property alias iconSource: tbIcon.source
@@ -4168,12 +4674,64 @@ Rectangle {
         }
     }
 
+    component AvailableColorsPalette : Grid {
+        id: colorsGrid
+        property int cellSize: width/columns
+        readonly property int suggestedWidth: 280
+        readonly property int suggestedHeight: 200
+        columns: 7
+        opacity: enabled ? 1 : 0.25
+
+        property color selectedColor: transparentColor
+        signal colorPicked(color newColor)
+
+        Item {
+            width: colorsGrid.cellSize
+            height: colorsGrid.cellSize
+
+            Image {
+                source: "../icons/navigation/close.png"
+                anchors.fill: parent
+                anchors.margins: 5
+                mipmap: true
+            }
+
+            MouseArea {
+                anchors.fill: parent
+                onClicked: colorPicked(transparentColor)
+            }
+        }
+
+        Repeater {
+            model: availableColors
+
+            Item {
+                required property color modelData
+                required property int index
+                width: colorsGrid.cellSize
+                height: colorsGrid.cellSize
+
+                Rectangle {
+                    anchors.fill: parent
+                    anchors.margins: 3
+                    border.width: colorsGrid.selectedColor === modelData ? 3 : 0.5
+                    border.color: "black"
+                    color: modelData
+                }
+
+                MouseArea {
+                    anchors.fill: parent
+                    onClicked: colorPicked(modelData)
+                }
+            }
+        }
+    }
+
     component ColorButton : Item {
         id: colorButton
-        width: 42
-        height: 42
-        property var colors: ["#e60000", "#ff9900", "#ffff00", "#008a00", "#0066cc", "#9933ff", "#ffffff", "#facccc", "#ffebcc", "#ffffcc", "#cce8cc", "#cce0f5", "#ebd6ff", "#bbbbbb", "#f06666", "#ffc266", "#ffff66", "#66b966", "#66a3e0", "#c285ff", "#888888", "#a10000", "#b26b00", "#b2b200", "#006100", "#0047b2", "#6b24b2", "#444444", "#5c0000", "#663d00", "#666600", "#003700", "#002966", "#3d1466"]
-        property color selectedColor: transparent
+        width: 36
+        height: 36
+        property color selectedColor: transparentColor
         opacity: enabled ? 1 : 0.5
         property alias hoverEnabled: cbMouseArea.hoverEnabled
         property alias containsMouse: cbMouseArea.containsMouse
@@ -4193,65 +4751,45 @@ Rectangle {
             sourceComponent: Popup {
                 id: colorsMenu
                 x: 0; y: 0
-                width: 280
-                height: 200
+                width: availableColorsPalette.suggestedWidth
+                height: availableColorsPalette.suggestedHeight
 
                 Component.onCompleted: open()
                 onClosed: Qt.callLater(() => { colorsMenuLoader.active = false})
 
-                contentItem: Grid {
-                    id: colorsGrid
-                    property int cellSize: width/columns
-                    columns: 7
-
-                    Item {
-                        width: colorsGrid.cellSize
-                        height: colorsGrid.cellSize
-
-                        Image {
-                            source: "../icons/navigation/close.png"
-                            anchors.fill: parent
-                            anchors.margins: 5
-                            mipmap: true
-                        }
-
-                        MouseArea {
-                            anchors.fill: parent
-                            onClicked: {
-                                colorPicked(transparent)
-                                colorsMenu.close()
-                            }
-                        }
-                    }
-
-                    Repeater {
-                        model: colorButton.colors
-
-                        Item {
-                            required property color modelData
-                            required property int index
-                            width: colorsGrid.cellSize
-                            height: colorsGrid.cellSize
-
-                            Rectangle {
-                                anchors.fill: parent
-                                anchors.margins: 3
-                                border.width: colorButton.selectedColor === modelData ? 3 : 0.5
-                                border.color: "black"
-                                color: modelData
-                            }
-
-                            MouseArea {
-                                anchors.fill: parent
-                                onClicked: {
-                                    colorPicked(modelData)
-                                    colorsMenu.close()
-                                }
-                            }
-                        }
-                    }
+                contentItem: AvailableColorsPalette {
+                    id: availableColorsPalette
+                    selectedColor: colorButton.selectedColor
+                    onColorPicked: (newColor) => {
+                                       colorButton.colorPicked(newColor)
+                                       colorsMenu.close()
+                                   }
                 }
             }
+        }
+    }
+
+    Rectangle {
+        id: screenplayEditorBusyOverlay
+        anchors.fill: parent
+        color: Qt.rgba(0,0,0,0.1)
+        opacity: 1
+        visible: RefCounter.isReffed
+        onVisibleChanged: parent.enabled = !visible
+
+        BusyIndicator {
+            anchors.centerIn: parent
+            running: parent.visible
+        }
+
+        function ref() {
+            RefCounter.ref()
+        }
+        function deref() {
+            RefCounter.deref()
+        }
+        function reset() {
+            RefCounter.reset()
         }
     }
 }

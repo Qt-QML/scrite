@@ -12,6 +12,7 @@
 ****************************************************************************/
 
 #include "finaldraftexporter.h"
+#include "application.h"
 
 #include <QDomDocument>
 #include <QDomElement>
@@ -40,6 +41,16 @@ void FinalDraftExporter::setUseScriteFonts(bool val)
     emit useScriteFontsChanged();
 }
 
+static QString fdxColorCode(const QColor &color)
+{
+    const QChar fillChar('0');
+    const QString templ = QStringLiteral("%1");
+    const QString red = templ.arg(color.red(), 2, 16, fillChar).toUpper();
+    const QString green = templ.arg(color.green(), 2, 16, fillChar).toUpper();
+    const QString blue = templ.arg(color.blue(), 2, 16, fillChar).toUpper();
+    return QStringLiteral("#") + red + red + green + green + blue + blue;
+};
+
 bool FinalDraftExporter::doExport(QIODevice *device)
 {
     const Screenplay *screenplay = this->document()->screenplay();
@@ -67,32 +78,101 @@ bool FinalDraftExporter::doExport(QIODevice *device)
     QDomElement contentE = doc.createElement(QStringLiteral("Content"));
     rootE.appendChild(contentE);
 
-    auto addTextToParagraph = [&doc, this](QDomElement &element, const QString &text) {
+    auto addTextToParagraph = [&doc, this](QDomElement &paraE, const QString &text,
+                                           Qt::Alignment overrideAlignment = Qt::Alignment(),
+                                           const QVector<QTextLayout::FormatRange> &textFormats =
+                                                   QVector<QTextLayout::FormatRange>()) {
+        if (overrideAlignment != 0) {
+            const QString alignmentAttr = QStringLiteral("Alignment");
+            switch (overrideAlignment) {
+            default:
+            case Qt::AlignLeft:
+                paraE.setAttribute(alignmentAttr, QStringLiteral("Left"));
+                break;
+            case Qt::AlignRight:
+                paraE.setAttribute(alignmentAttr, QStringLiteral("Right"));
+                break;
+            case Qt::AlignHCenter:
+                paraE.setAttribute(alignmentAttr, QStringLiteral("Center"));
+                break;
+            case Qt::AlignJustify:
+                paraE.setAttribute(alignmentAttr, QStringLiteral("Justify"));
+                break;
+            }
+        }
+
+        QVector<QTextLayout::FormatRange> mergedTextFormats = textFormats;
         if (m_markLanguagesExplicitly) {
             const QList<TransliterationEngine::Boundary> breakup =
                     TransliterationEngine::instance()->evaluateBoundaries(text, true);
-            for (const TransliterationEngine::Boundary &item : breakup) {
-                QDomElement textE = doc.createElement(QStringLiteral("Text"));
-                element.appendChild(textE);
-                if (item.language == TransliterationEngine::English) {
-                    textE.setAttribute(QStringLiteral("Font"),
-                                       QStringLiteral("Courier Final Draft"));
-                    textE.setAttribute(QStringLiteral("Language"), QStringLiteral("English"));
-                } else {
-                    const QFont font = TransliterationEngine::instance()->languageFont(
-                            item.language, m_useScriteFonts);
-                    textE.setAttribute(QStringLiteral("Font"), font.family());
-                    textE.setAttribute(
-                            QStringLiteral("Language"),
-                            TransliterationEngine::instance()->languageAsString(item.language));
-                }
-                textE.appendChild(doc.createTextNode(item.string));
-            }
-        } else {
+            mergedTextFormats = TransliterationEngine::mergeTextFormats(breakup, textFormats);
+        }
+
+        auto createTextElement = [&]() {
             QDomElement textE = doc.createElement(QStringLiteral("Text"));
-            element.appendChild(textE);
             textE.setAttribute(QStringLiteral("Font"), QStringLiteral("Courier Final Draft"));
+            textE.setAttribute(QStringLiteral("Language"), QStringLiteral("English"));
+            paraE.appendChild(textE);
+            return textE;
+        };
+
+        if (mergedTextFormats.isEmpty()) {
+            QDomElement textE = createTextElement();
             textE.appendChild(doc.createTextNode(text));
+        } else {
+            for (const QTextLayout::FormatRange &format : qAsConst(mergedTextFormats)) {
+                const QString snippet = text.mid(format.start, format.length);
+                if (snippet.isEmpty())
+                    continue;
+
+                QDomElement textE = createTextElement();
+
+                QStringList styles;
+                if (format.format.hasProperty(QTextFormat::FontWeight)) {
+                    if (format.format.fontWeight() == QFont::Bold)
+                        styles << QStringLiteral("Bold");
+                }
+
+                if (format.format.hasProperty(QTextFormat::FontItalic)) {
+                    if (format.format.fontItalic())
+                        styles << QStringLiteral("Italic");
+                }
+
+                if (format.format.hasProperty(QTextFormat::TextUnderlineStyle)) {
+                    if (format.format.fontUnderline())
+                        styles << QStringLiteral("Underline");
+                }
+
+                if (!styles.isEmpty())
+                    textE.setAttribute(QStringLiteral("Style"), styles.join('+'));
+
+                if (format.format.hasProperty(QTextFormat::BackgroundBrush)) {
+                    const QColor color = format.format.background().color();
+                    textE.setAttribute(QStringLiteral("Background"), fdxColorCode(color));
+                }
+
+                if (format.format.hasProperty(QTextFormat::ForegroundBrush)) {
+                    const QColor color = format.format.foreground().color();
+                    textE.setAttribute(QStringLiteral("Color"), fdxColorCode(color));
+                }
+
+                if (m_markLanguagesExplicitly) {
+                    TransliterationEngine::Language lang =
+                            (TransliterationEngine::Language)format.format
+                                    .property(QTextFormat::UserProperty)
+                                    .toInt();
+                    if (lang != TransliterationEngine::English) {
+                        const QFont font = TransliterationEngine::instance()->languageFont(
+                                lang, m_useScriteFonts);
+                        textE.setAttribute(QStringLiteral("Font"), font.family());
+                        textE.setAttribute(
+                                QStringLiteral("Language"),
+                                TransliterationEngine::instance()->languageAsString(lang));
+                    }
+                }
+
+                textE.appendChild(doc.createTextNode(snippet));
+            }
         }
     };
 
@@ -103,9 +183,11 @@ bool FinalDraftExporter::doExport(QIODevice *device)
             continue;
 
         const Scene *scene = element->scene();
+        const StructureElement *selement = scene->structureElement();
         const SceneHeading *heading = scene->heading();
 
-        if (heading->isEnabled()) {
+        if (heading->isEnabled() || scene->hasSynopsis()
+            || (selement && selement->hasNativeTitle())) {
             QDomElement paragraphE = doc.createElement(QStringLiteral("Paragraph"));
             contentE.appendChild(paragraphE);
 
@@ -113,14 +195,56 @@ bool FinalDraftExporter::doExport(QIODevice *device)
             if (element->hasUserSceneNumber())
                 paragraphE.setAttribute(QStringLiteral("Number"), element->userSceneNumber());
 
-            addTextToParagraph(paragraphE, heading->text());
-            locations.append(heading->location());
+            if (heading->isEnabled()) {
+                addTextToParagraph(paragraphE, heading->text());
+                locations.append(heading->location());
 
-            if (!locationTypes.contains(heading->locationType()))
-                locationTypes.append(heading->locationType());
+                if (!locationTypes.contains(heading->locationType()))
+                    locationTypes.append(heading->locationType());
 
-            if (!moments.contains(heading->moment()))
-                moments.append(heading->moment());
+                if (!moments.contains(heading->moment()))
+                    moments.append(heading->moment());
+            }
+
+            if (scene->hasSynopsis() || (selement && selement->hasNativeTitle())) {
+                QDomElement scenePropsE = doc.createElement(QStringLiteral("SceneProperties"));
+                paragraphE.appendChild(scenePropsE);
+                if (selement && selement->hasNativeTitle())
+                    scenePropsE.setAttribute(QStringLiteral("Title"), selement->nativeTitle());
+
+                const QColor sceneColor = scene->color();
+                const QColor tintColor(QStringLiteral("#E7FFFFFF"));
+                const QColor exportSceneColor =
+                        QColor::fromRgbF((sceneColor.redF() + tintColor.redF()) / 2,
+                                         (sceneColor.greenF() + tintColor.greenF()) / 2,
+                                         (sceneColor.blueF() + tintColor.blueF()) / 2,
+                                         (sceneColor.alphaF() + tintColor.alphaF()) / 2);
+
+                scenePropsE.setAttribute(QStringLiteral("Color"), fdxColorCode(exportSceneColor));
+
+                if (scene->hasSynopsis()) {
+                    QDomElement summaryE = doc.createElement(QStringLiteral("Summary"));
+                    scenePropsE.appendChild(summaryE);
+
+                    QDomElement summaryParagraphE = doc.createElement(QStringLiteral("Paragraph"));
+                    summaryE.appendChild(summaryParagraphE);
+
+                    const QString synopsis = scene->synopsis();
+                    QVector<QTextLayout::FormatRange> formats;
+
+#if 0
+                    // We don't need to apply scene color to synopsis text also.
+
+                    QTextLayout::FormatRange format;
+                    format.start = 0;
+                    format.length = synopsis.length();
+                    format.format.setBackground(exportSceneColor);
+                    format.format.setForeground(Application::textColorFor(exportSceneColor));
+                    formats.append(format);
+#endif
+                    addTextToParagraph(summaryParagraphE, synopsis, Qt::Alignment(), formats);
+                }
+            }
         }
 
         const int nrSceneElements = scene->elementCount();
@@ -130,7 +254,8 @@ bool FinalDraftExporter::doExport(QIODevice *device)
             contentE.appendChild(paragraphE);
 
             paragraphE.setAttribute(QStringLiteral("Type"), sceneElement->typeAsString());
-            addTextToParagraph(paragraphE, sceneElement->formattedText());
+            addTextToParagraph(paragraphE, sceneElement->formattedText(), sceneElement->alignment(),
+                               sceneElement->textFormats());
         }
 
         this->progress()->tick();
@@ -186,12 +311,4 @@ bool FinalDraftExporter::doExport(QIODevice *device)
     ts.flush();
 
     return true;
-}
-
-QString FinalDraftExporter::polishFileName(const QString &fileName) const
-{
-    QFileInfo fi(fileName);
-    if (fi.suffix().toLower() != "fdx")
-        return fileName + ".fdx";
-    return fileName;
 }

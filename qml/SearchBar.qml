@@ -15,6 +15,7 @@ import QtQuick 2.15
 import QtQuick.Controls 2.15
 import QtQuick.Controls.Material 2.15
 import io.scrite.components 1.0
+import "../js/utils.js" as Utils
 
 Item {
     id: searchBar
@@ -55,6 +56,7 @@ Item {
 
             TextAreaInput {
                 id: txtSearch
+                property bool canClear: searchEngine.searchResultCount > 0 || text !== ""
                 anchors.verticalCenter: parent.verticalCenter
                 anchors.left: parent.left
                 anchors.right: searchButtonsRow.left
@@ -64,7 +66,7 @@ Item {
                 KeyNavigation.priority: KeyNavigation.BeforeItem
                 Keys.onReturnPressed: triggerSearch()
                 Keys.onEscapePressed: {
-                    if(searchEngine.searchResultCount > 0) {
+                    if(canClear) {
                         clearSearch()
                         event.accepted = true
                     }
@@ -150,7 +152,7 @@ Item {
                 ToolButton2 {
                     icon.source: "../icons/navigation/close.png"
                     anchors.verticalCenter: parent.verticalCenter
-                    enabled: searchEngine.searchResultCount > 0
+                    enabled: txtSearch.canClear
                     onClicked: txtSearch.clearSearch()
                     suggestedHeight: 40
                     hoverEnabled: false
@@ -211,7 +213,7 @@ Item {
                     onClicked: click()
                     function click() {
                         searchEngine.replace(txtReplace.text)
-                        Scrite.app.execLater(searchEngine, 250, function() { searchEngine.nextSearchResult() })
+                        Utils.execLater(searchEngine, 250, function() { searchEngine.nextSearchResult() })
                     }
                 }
 

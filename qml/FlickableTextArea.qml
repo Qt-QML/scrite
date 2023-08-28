@@ -24,6 +24,7 @@ Flickable {
     property bool undoRedoEnabled: true
     property alias text: __textArea.text
     property alias font: __textArea.font
+    property alias textDocument: __textArea.textDocument
     property Item tabItem
     property Item backTabItem
     property alias readonly: __textArea.readOnly
@@ -35,7 +36,10 @@ Flickable {
     property bool spellCheckEnabled: true
     property TabSequenceManager tabSequenceManager
     property int tabSequenceIndex: 0
+    property alias syntaxHighlighter: __textArea.syntaxHighlighter
     FlickScrollSpeedControl.factor: workspaceSettings.flickScrollSpeedFactor
+
+    signal editingFinished()
 
     id: textAreaFlickable
     clip: true
@@ -45,6 +49,8 @@ Flickable {
 
     TextArea {
         id: __textArea
+        property SyntaxHighlighter syntaxHighlighter: Transliterator.highlighter
+        property var spellChecker: syntaxHighlighter.findDelegate("SpellCheckSyntaxHighlighterDelegate")
         width: textAreaFlickable.width - (textAreaFlickable.scrollBarRequired && textAreaFlickable.adjustTextWidthBasedOnScrollBar ? 20 : 0)
         height: Math.max(textAreaFlickable.height-topPadding-bottomPadding, contentHeight+20)
         font.pointSize: Scrite.app.idealFontPointSize
@@ -53,6 +59,7 @@ Flickable {
         selectByKeyboard: true
         leftPadding: 5; rightPadding: 5
         topPadding: 5; bottomPadding: 5
+        Transliterator.defaultFont: font
         Transliterator.textDocument: textDocument
         Transliterator.cursorPosition: cursorPosition
         Transliterator.hasActiveFocus: activeFocus
@@ -95,7 +102,49 @@ Flickable {
                 return
             textAreaFlickable.contentY = cy
         }
+        onEditingFinished: textAreaFlickable.editingFinished()
         TabSequenceItem.manager: tabSequenceManager
         TabSequenceItem.sequence: tabSequenceIndex
+    }
+
+    ContextMenuEvent.active: __textArea.spellChecker ? !__textArea.spellChecker.wordUnderCursorIsMisspelled : true
+    ContextMenuEvent.mode: ContextMenuEvent.GlobalEventFilterMode
+    ContextMenuEvent.onPopup: (mouse) => {
+        if(!__textArea.activeFocus) {
+            __textArea.forceActiveFocus()
+            __textArea.cursorPosition = __textArea.positionAt(mouse.x, mouse.y)
+        }
+        __contextMenu.popup()
+    }
+
+    Menu2 {
+        id: __contextMenu
+
+        property bool __persistentSelection: false
+        onAboutToShow: {
+            __persistentSelection = __textArea.persistentSelection
+            __textArea.persistentSelection = true
+        }
+        onAboutToHide: __textArea.persistentSelection = __persistentSelection
+
+        MenuItem2 {
+            text: "Cut\t" + Scrite.app.polishShortcutTextForDisplay("Ctrl+X")
+            enabled: __textArea.selectedText !== ""
+            onClicked: __textArea.cut()
+            focusPolicy: Qt.NoFocus
+        }
+
+        MenuItem2 {
+            text: "Copy\t" + Scrite.app.polishShortcutTextForDisplay("Ctrl+C")
+            enabled: __textArea.selectedText !== ""
+            onClicked: __textArea.copy()
+            focusPolicy: Qt.NoFocus
+        }
+
+        MenuItem2 {
+            text: "Paste\t" + Scrite.app.polishShortcutTextForDisplay("Ctrl+V")
+            onClicked: __textArea.paste()
+            focusPolicy: Qt.NoFocus
+        }
     }
 }

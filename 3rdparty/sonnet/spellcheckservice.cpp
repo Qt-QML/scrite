@@ -46,6 +46,7 @@ public:
     QString text;
     QList<TextFragment> misspelledFragments;
 };
+Q_DECLARE_METATYPE(SpellCheckServiceResult)
 
 class EnglishLanguageSpeller : public Sonnet::Speller
 {
@@ -69,6 +70,7 @@ struct SpellCheckServiceRequest
     QStringList characterNames;
     QStringList ignoreList;
 };
+Q_DECLARE_METATYPE(SpellCheckServiceRequest)
 
 void InitializeSpellCheckThread()
 {
@@ -148,7 +150,8 @@ SpellCheckServiceResult CheckSpellings(const SpellCheckServiceRequest &request)
                     continue;
             }
 
-            TextFragment fragment(wordPosition.start, wordPosition.length, speller.suggest(word));
+            const QStringList suggestions = speller.suggest(word);
+            TextFragment fragment(wordPosition.start, wordPosition.length, suggestions);
             if (fragment.isValid())
                 result.misspelledFragments << fragment;
         }
@@ -279,6 +282,14 @@ void SpellCheckService::update()
         return;
     }
 
+    // Since the result travels from background thread to main thread
+    static int serviceResultTypeId = qRegisterMetaType<SpellCheckServiceResult>();
+    Q_UNUSED(serviceResultTypeId)
+
+    // Since the result travels from background thread to main thread
+    static int serviceRequestTypeId = qRegisterMetaType<SpellCheckServiceRequest>();
+    Q_UNUSED(serviceRequestTypeId)
+
     SpellCheckServiceRequest request;
     request.text = m_text;
     request.timestamp = m_textModifiable.modificationTime();
@@ -333,7 +344,7 @@ void SpellCheckService::setMisspelledFragments(const QList<TextFragment> &val)
     m_misspelledFragments = val;
 
     QJsonArray json;
-    for (const TextFragment &textFrag : m_misspelledFragments) {
+    for (const TextFragment &textFrag : qAsConst(m_misspelledFragments)) {
         QJsonObject item;
         item.insert("start", textFrag.start());
         item.insert("length", textFrag.length());

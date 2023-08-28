@@ -110,7 +110,7 @@ QVariant ScriteDocumentBackups::data(const QModelIndex &index, int role) const
         return fi.birthTime().toString();
     case Qt::DisplayRole:
     case FileNameRole:
-        return fi.baseName();
+        return fi.completeBaseName();
     case FilePathRole:
         return fi.absoluteFilePath();
     case RelativeTimeRole:
@@ -168,7 +168,7 @@ void ScriteDocumentBackups::loadBackupFileInformation()
         return;
     }
 
-    const QString backupDirPath(fi.absolutePath() + QStringLiteral("/") + fi.baseName()
+    const QString backupDirPath(fi.absolutePath() + QStringLiteral("/") + fi.completeBaseName()
                                 + QStringLiteral(" Backups"));
     QDir backupDir(backupDirPath);
     if (!backupDir.exists()) {
@@ -300,6 +300,359 @@ void ScriteDocumentBackups::clear()
 
 ///////////////////////////////////////////////////////////////////////////////
 
+QJsonObject PageSetup::m_factoryDefaults;
+
+PageSetup::PageSetup(QObject *parent) : QObject(parent)
+{
+    connect(this, &PageSetup::paperSizeChanged, this, &PageSetup::pageSetupChanged);
+
+    connect(this, &PageSetup::headerLeftChanged, this, &PageSetup::pageSetupChanged);
+    connect(this, &PageSetup::headerCenterChanged, this, &PageSetup::pageSetupChanged);
+    connect(this, &PageSetup::headerRightChanged, this, &PageSetup::pageSetupChanged);
+    connect(this, &PageSetup::headerOpacityChanged, this, &PageSetup::pageSetupChanged);
+
+    connect(this, &PageSetup::footerLeftChanged, this, &PageSetup::pageSetupChanged);
+    connect(this, &PageSetup::footerCenterChanged, this, &PageSetup::pageSetupChanged);
+    connect(this, &PageSetup::footerRightChanged, this, &PageSetup::pageSetupChanged);
+    connect(this, &PageSetup::footerOpacityChanged, this, &PageSetup::pageSetupChanged);
+
+    connect(this, &PageSetup::watermarkAlignmentChanged, this, &PageSetup::pageSetupChanged);
+    connect(this, &PageSetup::watermarkColorChanged, this, &PageSetup::pageSetupChanged);
+    connect(this, &PageSetup::watermarkEnabledChanged, this, &PageSetup::pageSetupChanged);
+    connect(this, &PageSetup::watermarkFontChanged, this, &PageSetup::pageSetupChanged);
+    connect(this, &PageSetup::watermarkFontSizeChanged, this, &PageSetup::pageSetupChanged);
+    connect(this, &PageSetup::watermarkOpacityChanged, this, &PageSetup::pageSetupChanged);
+    connect(this, &PageSetup::watermarkRotationChanged, this, &PageSetup::pageSetupChanged);
+    connect(this, &PageSetup::watermarkTextChanged, this, &PageSetup::pageSetupChanged);
+
+    QSignalBlocker signalBlocker(this);
+    this->useSavedDefaults();
+    m_savedDefaults = QObjectSerializer::toJson(this);
+
+    this->evaluateDefaultsFlags();
+
+    connect(this, &PageSetup::pageSetupChanged, this, &PageSetup::evaluateDefaultsFlags);
+}
+
+PageSetup::~PageSetup() { }
+
+void PageSetup::setPaperSize(int val)
+{
+    if (m_paperSize == val)
+        return;
+
+    m_paperSize = val;
+    emit paperSizeChanged();
+}
+
+void PageSetup::setHeaderLeft(int val)
+{
+    if (m_headerLeft == val)
+        return;
+
+    m_headerLeft = val;
+    emit headerLeftChanged();
+}
+
+void PageSetup::setHeaderCenter(int val)
+{
+    if (m_headerCenter == val)
+        return;
+
+    m_headerCenter = val;
+    emit headerCenterChanged();
+}
+
+void PageSetup::setHeaderRight(int val)
+{
+    if (m_headerRight == val)
+        return;
+
+    m_headerRight = val;
+    emit headerRightChanged();
+}
+
+void PageSetup::setHeaderOpacity(qreal val)
+{
+    if (qFuzzyCompare(m_headerOpacity, val))
+        return;
+
+    m_headerOpacity = val;
+    emit headerOpacityChanged();
+}
+
+void PageSetup::setFooterLeft(int val)
+{
+    if (m_footerLeft == val)
+        return;
+
+    m_footerLeft = val;
+    emit footerLeftChanged();
+}
+
+void PageSetup::setFooterCenter(int val)
+{
+    if (m_footerCenter == val)
+        return;
+
+    m_footerCenter = val;
+    emit footerCenterChanged();
+}
+
+void PageSetup::setFooterRight(int val)
+{
+    if (m_footerRight == val)
+        return;
+
+    m_footerRight = val;
+    emit footerRightChanged();
+}
+
+void PageSetup::setFooterOpacity(qreal val)
+{
+    if (qFuzzyCompare(m_footerOpacity, val))
+        return;
+
+    m_footerOpacity = val;
+    emit footerOpacityChanged();
+}
+
+void PageSetup::setWatermarkEnabled(bool val)
+{
+    if (m_watermarkEnabled == val)
+        return;
+
+    m_watermarkEnabled = val;
+    emit watermarkEnabledChanged();
+}
+
+void PageSetup::setWatermarkText(const QString &val)
+{
+    if (m_watermarkText == val)
+        return;
+
+    m_watermarkText = val;
+    emit watermarkTextChanged();
+}
+
+void PageSetup::setWatermarkFont(const QString &val)
+{
+    if (m_watermarkFont == val)
+        return;
+
+    m_watermarkFont = val;
+    emit watermarkFontChanged();
+}
+
+void PageSetup::setWatermarkFontSize(int val)
+{
+    if (m_watermarkFontSize == val)
+        return;
+
+    m_watermarkFontSize = val;
+    emit watermarkFontSizeChanged();
+}
+
+void PageSetup::setWatermarkColor(const QColor &val)
+{
+    if (m_watermarkColor == val)
+        return;
+
+    m_watermarkColor = val;
+    emit watermarkColorChanged();
+}
+
+void PageSetup::setWatermarkOpacity(qreal val)
+{
+    if (qFuzzyCompare(m_watermarkOpacity, val))
+        return;
+
+    m_watermarkOpacity = val;
+    emit watermarkOpacityChanged();
+}
+
+void PageSetup::setWatermarkRotation(int val)
+{
+    if (m_watermarkRotation == val)
+        return;
+
+    m_watermarkRotation = val;
+    emit watermarkRotationChanged();
+}
+
+void PageSetup::setWatermarkAlignment(int val)
+{
+    if (m_watermarkAlignment == val)
+        return;
+
+    m_watermarkAlignment = val;
+    emit watermarkAlignmentChanged();
+}
+
+void PageSetup::useFactoryDefaults()
+{
+    m_headerLeft = HeaderFooter::Title;
+    emit headerLeftChanged();
+
+    m_headerCenter = HeaderFooter::Subtitle;
+    emit headerCenterChanged();
+
+    m_headerRight = HeaderFooter::PageNumber;
+    emit headerRightChanged();
+
+    m_headerOpacity = 0.5;
+    emit headerOpacityChanged();
+
+    m_footerLeft = HeaderFooter::Author;
+    emit footerLeftChanged();
+
+    m_footerCenter = HeaderFooter::Version;
+    emit footerCenterChanged();
+
+    m_footerRight = HeaderFooter::Contact;
+    emit footerRightChanged();
+
+    m_footerOpacity = 0.5;
+    emit footerOpacityChanged();
+
+    m_paperSize = ScreenplayPageLayout::Letter;
+    emit paperSizeChanged();
+
+    m_watermarkEnabled = true;
+    emit watermarkEnabledChanged();
+
+    m_watermarkText = QLatin1String("Scrite");
+    emit watermarkTextChanged();
+
+    m_watermarkFont = QLatin1String("Courier Prime");
+    emit watermarkFontChanged();
+
+    m_watermarkFontSize = 120;
+    emit watermarkFontSizeChanged();
+
+    m_watermarkColor = QColor(Qt::lightGray);
+    emit watermarkColorChanged();
+
+    m_watermarkOpacity = 0.5;
+    emit watermarkOpacityChanged();
+
+    m_watermarkRotation = -45;
+    emit watermarkRotationChanged();
+
+    m_watermarkAlignment = Qt::AlignCenter;
+    emit watermarkAlignmentChanged();
+
+    if (m_factoryDefaults.isEmpty())
+        m_factoryDefaults = QObjectSerializer::toJson(this);
+}
+
+void PageSetup::saveAsDefaults()
+{
+    const QString group = QLatin1String("PageSetup/");
+    QSettings *settings = Application::instance()->settings();
+
+    settings->setValue(group + QLatin1String("paperSize"), m_paperSize);
+
+    settings->setValue(group + QLatin1String("headerLeft"), m_headerLeft);
+    settings->setValue(group + QLatin1String("headerCenter"), m_headerCenter);
+    settings->setValue(group + QLatin1String("headerRight"), m_headerRight);
+    settings->setValue(group + QLatin1String("headerOpacity"), m_headerOpacity);
+
+    settings->setValue(group + QLatin1String("footerLeft"), m_footerLeft);
+    settings->setValue(group + QLatin1String("footerCenter"), m_footerCenter);
+    settings->setValue(group + QLatin1String("footerRight"), m_footerRight);
+    settings->setValue(group + QLatin1String("footerOpacity"), m_footerOpacity);
+
+    settings->setValue(group + QLatin1String("watermarkEnabled"), m_watermarkEnabled);
+    settings->setValue(group + QLatin1String("watermarkText"), m_watermarkText);
+    settings->setValue(group + QLatin1String("watermarkFont"), m_watermarkFont);
+    settings->setValue(group + QLatin1String("watermarkFontSize"), m_watermarkFontSize);
+    settings->setValue(group + QLatin1String("watermarkColor"), m_watermarkColor);
+    settings->setValue(group + QLatin1String("watermarkOpacity"), m_watermarkOpacity);
+    settings->setValue(group + QLatin1String("watermarkRotation"), m_watermarkRotation);
+    settings->setValue(group + QLatin1String("watermarkAlignment"), m_watermarkAlignment);
+
+    m_savedDefaults = QObjectSerializer::toJson(this);
+
+    this->evaluateDefaultsFlags();
+}
+
+void PageSetup::useSavedDefaults()
+{
+    const QString group = QLatin1String("PageSetup/");
+    const QSettings *settings = Application::instance()->settings();
+
+    this->useFactoryDefaults();
+
+    this->setPaperSize(settings->value(group + QLatin1String("paperSize"), m_paperSize).toInt());
+
+    this->setHeaderLeft(settings->value(group + QLatin1String("headerLeft"), m_headerLeft).toInt());
+    this->setHeaderCenter(
+            settings->value(group + QLatin1String("headerCenter"), m_headerCenter).toInt());
+    this->setHeaderRight(
+            settings->value(group + QLatin1String("headerRight"), m_headerRight).toInt());
+    this->setHeaderOpacity(
+            settings->value(group + QLatin1String("headerOpacity"), m_headerOpacity).toReal());
+
+    this->setFooterLeft(settings->value(group + QLatin1String("footerLeft"), m_footerLeft).toInt());
+    this->setFooterCenter(
+            settings->value(group + QLatin1String("footerCenter"), m_footerCenter).toInt());
+    this->setFooterRight(
+            settings->value(group + QLatin1String("footerRight"), m_footerRight).toInt());
+    this->setFooterOpacity(
+            settings->value(group + QLatin1String("footerOpacity"), m_footerOpacity).toReal());
+
+    this->setWatermarkEnabled(
+            settings->value(group + QLatin1String("watermarkEnabled"), m_watermarkEnabled)
+                    .toBool());
+    this->setWatermarkText(
+            settings->value(group + QLatin1String("watermarkText"), m_watermarkText).toString());
+    this->setWatermarkFont(
+            settings->value(group + QLatin1String("watermarkFont"), m_watermarkFont).toString());
+    this->setWatermarkFontSize(
+            settings->value(group + QLatin1String("watermarkFontSize"), m_watermarkFontSize)
+                    .toInt());
+    this->setWatermarkColor(
+            settings->value(group + QLatin1String("watermarkColor"), m_watermarkColor)
+                    .value<QColor>());
+    this->setWatermarkOpacity(
+            settings->value(group + QLatin1String("watermarkOpacity"), m_watermarkOpacity)
+                    .toReal());
+    this->setWatermarkRotation(
+            settings->value(group + QLatin1String("watermarkRotation"), m_watermarkRotation)
+                    .toInt());
+    this->setWatermarkAlignment(
+            settings->value(group + QLatin1String("watermarkAlignment"), m_watermarkAlignment)
+                    .toInt());
+}
+
+void PageSetup::setUsingFactoryDefaults(bool val)
+{
+    if (m_isFactoryDefaults == val)
+        return;
+
+    m_isFactoryDefaults = val;
+    emit usingFactoryDefaultsChanged();
+}
+
+void PageSetup::setUsingSavedDefaults(bool val)
+{
+    if (m_isSavedDefaults == val)
+        return;
+
+    m_isSavedDefaults = val;
+    emit usingSavedDefaultsChanged();
+}
+
+void PageSetup::evaluateDefaultsFlags()
+{
+    const QJsonObject json = QObjectSerializer::toJson(this);
+    this->setUsingFactoryDefaults(json == m_factoryDefaults);
+    this->setUsingSavedDefaults(json == m_savedDefaults);
+}
+
+///////////////////////////////////////////////////////////////////////////////
+
 class DeviceIOFactories
 {
 public:
@@ -356,6 +709,7 @@ ScriteDocument::ScriteDocument(QObject *parent)
       m_formatting(this, "formatting"),
       m_printFormat(this, "printFormat"),
       m_forms(this, "forms"),
+      m_pageSetup(this, "pageSetup"),
       m_evaluateStructureElementSequenceTimer(
               "ScriteDocument.m_evaluateStructureElementSequenceTimer")
 {
@@ -391,8 +745,14 @@ ScriteDocument::ScriteDocument(QObject *parent)
 
     connect(this, &ScriteDocument::collaboratorsChanged, this,
             &ScriteDocument::canModifyCollaboratorsChanged);
-    connect(User::instance(), &User::loggedInChanged, this,
-            &ScriteDocument::canModifyCollaboratorsChanged);
+
+    // We cannot use User::instance() right now, because it will
+    // refer back to ScriteDocument::instance() and cause a recusrion,
+    // leading to crash.
+    QTimer::singleShot(10, this, [=]() {
+        connect(User::instance(), &User::loggedInChanged, this,
+                &ScriteDocument::canModifyCollaboratorsChanged);
+    });
 
     connect(qApp, &QApplication::aboutToQuit, this, [=]() {
         if (m_autoSave && !m_fileName.isEmpty())
@@ -536,7 +896,7 @@ void ScriteDocument::disableCollaboration()
 
 void ScriteDocument::setAutoSaveDurationInSeconds(int val)
 {
-    val = qBound(1, val, 3600);
+    val = qBound(30, val, 3600);
     if (m_autoSaveDurationInSeconds == val)
         return;
 
@@ -665,7 +1025,7 @@ Scene *ScriteDocument::createNewScene(bool fuzzyScreenplayInsert)
     Scene *scene = new Scene(m_structure);
     scene->setColor(activeScene ? activeScene->color() : defaultColor);
     if (m_structure->canvasUIMode() != Structure::IndexCardUI)
-        scene->setTitle(QStringLiteral("New Scene"));
+        scene->setSynopsis(QStringLiteral("New Scene"));
     scene->heading()->setEnabled(true);
     scene->heading()->setLocationType(activeScene ? activeScene->heading()->locationType()
                                                   : QStringLiteral("EXT"));
@@ -817,7 +1177,7 @@ void ScriteDocument::reset()
                    &ScriteDocument::markAsModified);
 
     UndoStack::clearAllStacks();
-    m_docFileSystem.reset();
+    m_docFileSystem.hardReset();
 
     this->setSessionId(QUuid::createUuid().toString());
     this->setDocumentId(QUuid::createUuid().toString());
@@ -838,6 +1198,7 @@ void ScriteDocument::reset()
     else
         m_printFormat->resetToUserDefaults();
 
+    this->setPageSetup(new PageSetup(this));
     this->setForms(new Forms(this));
     this->setScreenplay(new Screenplay(this));
     this->setStructure(new Structure(this));
@@ -913,7 +1274,7 @@ bool ScriteDocument::open(const QString &fileName)
 
     HourGlass hourGlass;
 
-    this->setBusyMessage("Loading " + QFileInfo(fileName).baseName() + " ...");
+    this->setBusyMessage("Loading " + QFileInfo(fileName).completeBaseName() + " ...");
     this->reset();
     const bool ret = this->load(fileName);
     if (ret)
@@ -976,7 +1337,7 @@ void ScriteDocument::saveAs(const QString &givenFileName)
     }
 
     if (!m_autoSaveMode)
-        this->setBusyMessage("Saving to " + QFileInfo(fileName).baseName() + " ...");
+        this->setBusyMessage("Saving to " + QFileInfo(fileName).completeBaseName() + " ...");
 
     m_progressReport->start();
 
@@ -986,18 +1347,6 @@ void ScriteDocument::saveAs(const QString &givenFileName)
     const QByteArray bytes = QJsonDocument(json).toJson();
     m_docFileSystem.setHeader(bytes);
 
-    const bool success = m_docFileSystem.save(fileName, !m_collaborators.isEmpty());
-
-    if (!success) {
-        m_errorReport->setErrorMessage(QStringLiteral("Couldn't save document \"") + fileName
-                                       + QStringLiteral("\""));
-        emit justSaved();
-        m_progressReport->finish();
-        if (!m_autoSaveMode)
-            this->clearBusyMessage();
-        return;
-    }
-
 #ifndef QT_NO_DEBUG_OUTPUT
     const bool saveJson = true;
 #else
@@ -1005,26 +1354,58 @@ void ScriteDocument::saveAs(const QString &givenFileName)
 #endif
     if (saveJson) {
         const QFileInfo fi(fileName);
-        const QString fileName2 = fi.absolutePath() + "/" + fi.baseName() + ".json";
+        const QString fileName2 = fi.absolutePath() + "/" + fi.completeBaseName() + ".json";
         QFile file2(fileName2);
         file2.open(QFile::WriteOnly);
         file2.write(bytes);
     }
 
-    this->setFileName(fileName);
-    this->setCreatedOnThisComputer(true);
+    if (m_autoSaveMode) {
+        QObject *autoSaveContext = new QObject(this);
+        connect(&m_docFileSystem, &DocumentFileSystem::saveFinished, autoSaveContext,
+                [=](bool success) {
+                    autoSaveContext->deleteLater();
+                    if (!success) {
+                        m_errorReport->setErrorMessage(QStringLiteral("Auto Save Failed."));
 
-    emit justSaved();
+                        m_modified = true;
+                        emit modifiedChanged();
+                    }
 
-    m_modified = false;
-    emit modifiedChanged();
+                    emit justSaved();
+                    m_progressReport->finish();
+                });
 
-    m_progressReport->finish();
+        m_docFileSystem.save(fileName, !m_collaborators.isEmpty(),
+                             DocumentFileSystem::NonBlockingSaveMode);
+        m_modified = false;
+        emit modifiedChanged();
+    } else {
+        const bool success = m_docFileSystem.save(fileName, !m_collaborators.isEmpty());
 
-    this->setReadOnly(false);
+        if (!success) {
+            m_errorReport->setErrorMessage(QStringLiteral("Couldn't save document \"") + fileName
+                                           + QStringLiteral("\""));
+            emit justSaved();
+            m_progressReport->finish();
+            this->clearBusyMessage();
+            return;
+        }
 
-    if (!m_autoSaveMode)
+        this->setFileName(fileName);
+        this->setCreatedOnThisComputer(true);
+
+        emit justSaved();
+
+        m_modified = false;
+        emit modifiedChanged();
+
+        m_progressReport->finish();
+
+        this->setReadOnly(false);
+
         this->clearBusyMessage();
+    }
 }
 
 void ScriteDocument::save()
@@ -1039,13 +1420,13 @@ void ScriteDocument::save()
 
     QFileInfo fi(m_fileName);
     if (fi.exists()) {
-        const QString backupDirPath(fi.absolutePath() + "/" + fi.baseName() + " Backups");
+        const QString backupDirPath(fi.absolutePath() + "/" + fi.completeBaseName() + " Backups");
         QDir().mkpath(backupDirPath);
 
         const qint64 now = QDateTime::currentSecsSinceEpoch();
 
         auto timeGapInSeconds = [now](const QFileInfo &fi) {
-            const QString baseName = fi.baseName();
+            const QString baseName = fi.completeBaseName();
             const QString thenStr = baseName.section('[', 1).section(']', 0, 0);
             const qint64 then = thenStr.toLongLong();
             return now - then;
@@ -1071,8 +1452,8 @@ void ScriteDocument::save()
             }
         }
 
-        const QString backupFileName =
-                backupDirPath + "/" + fi.baseName() + " [" + QString::number(now) + "].scrite";
+        const QString backupFileName = backupDirPath + "/" + fi.completeBaseName() + " ["
+                + QString::number(now) + "].scrite";
         const bool backupSuccessful = QFile::copy(m_fileName, backupFileName);
 
         if (firstBackup && backupSuccessful)
@@ -1254,10 +1635,11 @@ bool ScriteDocument::exportToImage(int fromSceneIdx, int fromParaIdx, int toScen
 
     QTextCursor cursor(&document);
 
-    auto prepareCursor = [=](QTextCursor &cursor, SceneElement::Type paraType) {
+    auto prepareCursor = [=](QTextCursor &cursor, SceneElement::Type paraType,
+                             Qt::Alignment overrideAlignment) {
         const qreal pageWidth = m_printFormat->pageLayout()->contentWidth();
         const SceneElementFormat *format = m_printFormat->elementFormat(paraType);
-        QTextBlockFormat blockFormat = format->createBlockFormat(&pageWidth);
+        QTextBlockFormat blockFormat = format->createBlockFormat(overrideAlignment, &pageWidth);
         QTextCharFormat charFormat = format->createCharFormat(&pageWidth);
         cursor.setCharFormat(charFormat);
         cursor.setBlockFormat(blockFormat);
@@ -1282,7 +1664,7 @@ bool ScriteDocument::exportToImage(int fromSceneIdx, int fromParaIdx, int toScen
             endParaIdx = scene->elementCount() - 1;
 
         if (startParaIdx == 0 && scene->heading()->isEnabled()) {
-            prepareCursor(cursor, SceneElement::Heading);
+            prepareCursor(cursor, SceneElement::Heading, Qt::Alignment());
             cursor.insertText(QStringLiteral("[") + element->resolvedSceneNumber()
                               + QStringLiteral("] "));
             cursor.insertText(scene->heading()->text());
@@ -1291,7 +1673,7 @@ bool ScriteDocument::exportToImage(int fromSceneIdx, int fromParaIdx, int toScen
 
         for (int p = startParaIdx; p <= endParaIdx; p++) {
             const SceneElement *para = scene->elementAt(p);
-            prepareCursor(cursor, para->type());
+            prepareCursor(cursor, para->type(), para->alignment());
             cursor.insertText(para->text());
             if (p < endParaIdx)
                 cursor.insertBlock();
@@ -1315,7 +1697,7 @@ bool ScriteDocument::exportToImage(int fromSceneIdx, int fromParaIdx, int toScen
 
 inline QString createTimestampString(const QDateTime &dt = QDateTime::currentDateTime())
 {
-    static const QString format = QStringLiteral("MMM dd, yyyy HHmmss");
+    static const QString format = QStringLiteral("MMM dd yyyy h.m AP");
     return dt.toString(format);
 }
 
@@ -1353,14 +1735,17 @@ void ScriteDocument::setupExporter(AbstractExporter *exporter)
     exporter->setDocument(this);
 
     if (exporter->fileName().isEmpty()) {
-        QString suggestedName = m_screenplay->title();
+        QString suggestedName = QFileInfo(m_fileName).completeBaseName();
         if (suggestedName.isEmpty())
-            suggestedName = QFileInfo(m_fileName).baseName();
+            suggestedName = m_screenplay->title();
         if (suggestedName.isEmpty())
-            suggestedName = QStringLiteral("Scrite - Screenplay");
-        else
-            suggestedName += QStringLiteral(" - Screenplay");
+            suggestedName = QStringLiteral("Scrite Screenplay");
+
+        suggestedName += QStringLiteral(" - ") + exporter->formatName();
         suggestedName += QStringLiteral(" - ") + createTimestampString();
+
+        // Insert a dummy extension, so that exporters can correct it.
+        suggestedName += QStringLiteral(".ext");
 
 #if 0
         QFileInfo fi(m_fileName);
@@ -1402,15 +1787,16 @@ void ScriteDocument::setupReportGenerator(AbstractReportGenerator *reportGenerat
     reportGenerator->setDocument(this);
 
     if (reportGenerator->fileName().isEmpty()) {
-        QString suggestedName = m_screenplay->title();
+        QString suggestedName = QFileInfo(m_fileName).completeBaseName();
         if (suggestedName.isEmpty())
-            suggestedName = QFileInfo(m_fileName).baseName();
+            suggestedName = m_screenplay->title();
         if (suggestedName.isEmpty())
             suggestedName = QStringLiteral("Scrite");
 
         const QString reportName = reportGenerator->name();
-        const QString suffix =
-                reportGenerator->format() == AbstractReportGenerator::AdobePDF ? ".pdf" : ".odt";
+        const QString suffix = reportGenerator->format() == AbstractReportGenerator::AdobePDF
+                ? QStringLiteral(".pdf")
+                : QStringLiteral(".odt");
         suggestedName = suggestedName + QStringLiteral(" - ") + reportName + QStringLiteral(" - ")
                 + createTimestampString() + suffix;
 
@@ -1495,26 +1881,24 @@ bool ScriteDocument::runSaveSanityChecks(const QString &givenFileName)
         return false;
     }
 
-    QFileInfo fi(fileName);
-
     // 2. Filename must not contain special characters
     // It is true that file names will have already been sanitized using
     // Application::sanitiseFileName() But we double check it here anyway.
-    static const QList<QChar> allowedChars = { '-', '_', '[', ']', '(', ')', '{', '}', '&', ' ' };
-    const QString baseFileName = fi.baseName();
-    for (const QChar ch : baseFileName) {
-        if (ch.isLetterOrNumber() || ch.isSpace())
-            continue;
-
-        if (allowedChars.contains(ch))
-            continue;
-
-        m_errorReport->setErrorMessage(
-                QStringLiteral("File name cannot contain special character '%1'").arg(ch));
+    QSet<QChar> purgedChars;
+    const QString sanitisedFileName = Application::sanitiseFileName(fileName, &purgedChars);
+    if (sanitisedFileName != fileName || !purgedChars.isEmpty()) {
+        if (purgedChars.isEmpty())
+            m_errorReport->setErrorMessage(
+                    QStringLiteral("File name contains invalid characters."));
+        else
+            m_errorReport->setErrorMessage(
+                    QStringLiteral("File name cannot contain special character '%1'")
+                            .arg(*purgedChars.begin()));
         return false;
     }
 
     // 3. File already exists, but has become readonly now.
+    QFileInfo fi(fileName);
     if (fi.exists() && !fi.isWritable()) {
         m_errorReport->setErrorMessage(
                 QStringLiteral("Cannot open '%1' for writing.").arg(fileName));
@@ -1583,7 +1967,7 @@ void ScriteDocument::updateDocumentWindowTitle()
     if (m_fileName.isEmpty())
         title += QStringLiteral("[noname]");
     else
-        title += QFileInfo(m_fileName).baseName();
+        title += QFileInfo(m_fileName).completeBaseName();
     title += QStringLiteral(" - ") + qApp->property("baseWindowTitle").toString();
     this->setDocumentWindowTitle(title);
 }
@@ -1664,15 +2048,40 @@ void ScriteDocument::setForms(Forms *val)
     if (m_forms == val)
         return;
 
-    if (m_forms != nullptr)
+    if (m_forms != nullptr) {
         GarbageCollector::instance()->add(m_forms);
+        disconnect(m_forms, &Forms::formCountChanged, this, &ScriteDocument::markAsModified);
+    }
 
     m_forms = val;
 
-    if (m_forms != nullptr)
+    if (m_forms != nullptr) {
         m_forms->setParent(this);
+        connect(m_forms, &Forms::formCountChanged, this, &ScriteDocument::markAsModified);
+    }
 
     emit formsChanged();
+}
+
+void ScriteDocument::setPageSetup(PageSetup *val)
+{
+    if (m_pageSetup == val)
+        return;
+
+    if (m_pageSetup != nullptr) {
+        disconnect(m_pageSetup, &PageSetup::pageSetupChanged, this,
+                   &ScriteDocument::markAsModified);
+        GarbageCollector::instance()->add(m_pageSetup);
+    }
+
+    m_pageSetup = val;
+
+    if (m_pageSetup != nullptr) {
+        m_pageSetup->setParent(this);
+        connect(m_pageSetup, &PageSetup::pageSetupChanged, this, &ScriteDocument::markAsModified);
+    }
+
+    emit pageSetupChanged();
 }
 
 void ScriteDocument::evaluateStructureElementSequence()
@@ -1755,7 +2164,7 @@ bool ScriteDocument::load(const QString &fileName)
                 m_document->m_progressReport->finish();
                 m_document->setLoading(false);
             } else
-                m_document->m_docFileSystem.reset();
+                m_document->m_docFileSystem.hardReset();
         }
 
         void begin()
@@ -1788,7 +2197,7 @@ bool ScriteDocument::load(const QString &fileName)
 #ifndef QT_NO_DEBUG_OUTPUT
     {
         const QFileInfo fi(fileName);
-        const QString fileName2 = fi.absolutePath() + "/" + fi.baseName() + ".json";
+        const QString fileName2 = fi.absolutePath() + "/" + fi.completeBaseName() + ".json";
         QFile file2(fileName2);
         file2.open(QFile::WriteOnly);
         file2.write(jsonDoc.toJson());
@@ -2118,7 +2527,7 @@ void ScriteDocument::deserializeFromJson(const QJsonObject &json)
 
         // Without a proper document-id, we will end up having too many restore
         // points of the same doucment.
-        ExecLaterTimer::call("ScriteDocument.saveNewDocumentId", this, [=]() {
+        QTimer::singleShot(0, this, [=]() {
             if (!m_fileName.isEmpty())
                 this->save();
         });

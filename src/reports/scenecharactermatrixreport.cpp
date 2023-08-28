@@ -78,14 +78,9 @@ void SceneCharacterMatrixReport::setTags(const QStringList &val)
     emit tagsChanged();
 }
 
-QString SceneCharacterMatrixReport::polishFileName(const QString &fileName) const
+QString SceneCharacterMatrixReport::fileNameExtension() const
 {
-    if (this->format() == OpenDocumentFormat) {
-        QFileInfo fi(fileName);
-        return fi.absoluteDir().absoluteFilePath(fi.baseName() + QStringLiteral(".csv"));
-    }
-
-    return AbstractReportGenerator::polishFileName(fileName);
+    return this->format() == OpenDocumentFormat ? QStringLiteral("csv") : QStringLiteral("pdf");
 }
 
 struct CreateColumnHeadingImageFunctor
@@ -178,11 +173,6 @@ bool SceneCharacterMatrixReport::doGenerate(QTextDocument *document)
         if (title.isEmpty())
             title = "Untitled Screenplay";
         cursor.insertText(title);
-        if (!screenplay->subtitle().isEmpty()) {
-            cursor.insertBlock();
-            cursor.insertText(screenplay->subtitle());
-        }
-
         blockFormat.setBottomMargin(20);
 
         const QString reportType = (m_type == SceneVsCharacter)
@@ -223,7 +213,8 @@ bool SceneCharacterMatrixReport::doGenerate(QTextDocument *document)
     QTextTableFormat tableFormat;
     tableFormat.setCellSpacing(0);
     tableFormat.setCellPadding(5);
-    tableFormat.setBorder(3);
+    tableFormat.setBorder(1);
+    tableFormat.setBorderCollapse(true);
     tableFormat.setBorderStyle(QTextFrameFormat::BorderStyle_Solid);
     tableFormat.setHeaderRowCount(1);
     tableFormat.setAlignment(Qt::AlignHCenter);
@@ -232,7 +223,7 @@ bool SceneCharacterMatrixReport::doGenerate(QTextDocument *document)
 
     QTextTable *table =
             cursor.insertTable(rowHeadings.size() + 1, columnHeadings.size() + 1, tableFormat);
-
+#if 0
     for (int i = 0; i < rowHeadings.size(); i++) {
         const QString text = rowHeadings.at(i);
         const QImage image = headingImageFunctor(text);
@@ -244,6 +235,14 @@ bool SceneCharacterMatrixReport::doGenerate(QTextDocument *document)
         QTextCursor cursor = cell.firstCursorPosition();
         cursor.insertImage(resourceName);
     }
+#else
+    for (int i = 0; i < rowHeadings.size(); i++) {
+        const QString text = rowHeadings.at(i);
+        QTextTableCell cell = table->cellAt(i + 1, 0);
+        QTextCursor cursor = cell.firstCursorPosition();
+        cursor.insertText(text);
+    }
+#endif
 
     headingImageFunctor.transform.rotate(90);
 

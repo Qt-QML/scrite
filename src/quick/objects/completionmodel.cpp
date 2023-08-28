@@ -13,15 +13,36 @@
 
 #include "completionmodel.h"
 #include "timeprofiler.h"
+#include "application.h"
 
-#include <QGuiApplication>
 #include <QKeyEvent>
+#include <QtConcurrentRun>
+#include <QGuiApplication>
+
+static bool isEnglishString(const QString &item)
+{
+    for (const QChar &ch : item) {
+        if (ch.isLetter() && ch.script() != QChar::Script_Latin)
+            return false;
+    }
+
+    return true;
+}
 
 CompletionModel::CompletionModel(QObject *parent) : QAbstractListModel(parent)
 {
     connect(this, &QAbstractListModel::rowsInserted, this, &CompletionModel::countChanged);
     connect(this, &QAbstractListModel::rowsRemoved, this, &CompletionModel::countChanged);
     connect(this, &QAbstractListModel::modelReset, this, &CompletionModel::countChanged);
+
+    connect(this, &CompletionModel::currentRowChanged, this,
+            &CompletionModel::currentCompletionChanged);
+    connect(this, &QAbstractListModel::rowsInserted, this,
+            &CompletionModel::currentCompletionChanged);
+    connect(this, &QAbstractListModel::rowsRemoved, this,
+            &CompletionModel::currentCompletionChanged);
+    connect(this, &QAbstractListModel::modelReset, this,
+            &CompletionModel::currentCompletionChanged);
 }
 
 CompletionModel::~CompletionModel() { }
@@ -31,26 +52,21 @@ void CompletionModel::setStrings(const QStringList &val)
     if (m_strings == val)
         return;
 
-    if (m_acceptEnglishStringsOnly) {
-        m_strings.clear();
-        std::copy_if(
-                val.begin(), val.end(), std::back_inserter(m_strings), [](const QString &item) {
-                    QList<QChar> nonLatinChars;
-                    std::copy_if(item.begin(), item.end(), std::back_inserter(nonLatinChars),
-                                 [](const QChar &ch) {
-                                     return ch.isLetter() && ch.script() != QChar::Script_Latin;
-                                 });
-                    return nonLatinChars.isEmpty();
-                });
-    } else
-        m_strings = val;
-
-    if (m_sortStrings)
-        std::sort(m_strings.begin(), m_strings.end());
-
+    m_strings = val;
     emit stringsChanged();
 
-    this->filterStrings();
+    this->prepareStrings();
+}
+
+void CompletionModel::setPriorityStrings(QStringList val)
+{
+    if (m_priorityStrings == val)
+        return;
+
+    m_priorityStrings = val;
+    emit priorityStringsChanged();
+
+    this->prepareStrings();
 }
 
 void CompletionModel::setAcceptEnglishStringsOnly(bool val)
@@ -60,6 +76,8 @@ void CompletionModel::setAcceptEnglishStringsOnly(bool val)
 
     m_acceptEnglishStringsOnly = val;
     emit acceptEnglishStringsOnlyChanged();
+
+    this->prepareStrings();
 }
 
 void CompletionModel::setSortStrings(bool val)
@@ -70,12 +88,16 @@ void CompletionModel::setSortStrings(bool val)
     m_sortStrings = val;
     emit sortStringsChanged();
 
-    if (val) {
-        std::sort(m_strings.begin(), m_strings.end());
-        emit stringsChanged();
+    this->prepareStrings();
+}
 
-        this->filterStrings();
-    }
+void CompletionModel::setSortMode(SortMode val)
+{
+    if (m_sortMode == val)
+        return;
+
+    m_sortMode = val;
+    emit sortModeChanged();
 }
 
 void CompletionModel::setMaxVisibleItems(int val)
@@ -189,15 +211,15 @@ bool CompletionModel::eventFilter(QObject *target, QEvent *event)
             }
             break;
         case Qt::Key_Escape:
-            this->beginResetModel();
-            m_filteredStrings.clear();
-            this->endResetModel();
+            this->clearFilterStrings();
             return true;
         case Qt::Key_Enter:
         case Qt::Key_Return: {
             const QString cc = this->currentCompletion();
             if (!cc.isEmpty()) {
                 emit requestCompletion(cc);
+
+                QTimer::singleShot(0, this, &CompletionModel::clearFilterStrings);
                 return true;
             }
         } break;
@@ -218,34 +240,82 @@ void CompletionModel::setCurrentRow(int val)
 
 void CompletionModel::filterStrings()
 {
-    if (!m_enabled || m_completionPrefix.size() < m_minimumCompletionPrefixLength) {
-        if (m_filteredStrings.isEmpty())
-            return;
-
-        this->beginResetModel();
-        m_filteredStrings.clear();
-        this->endResetModel();
-
-        this->setCurrentRow(-1);
-
+    if (!m_enabled || m_completionPrefix.size() < m_minimumCompletionPrefixLength
+        || m_strings2.isEmpty()) {
+        this->clearFilterStrings();
         return;
     }
 
+    bool someFilteringHappened = false;
     QStringList fstrings;
-    std::copy_if(m_strings.begin(), m_strings.end(), std::back_inserter(fstrings),
-                 [=](const QString &item) {
-                     return item.compare(m_completionPrefix, Qt::CaseInsensitive)
-                             && item.startsWith(m_completionPrefix, Qt::CaseInsensitive);
-                 });
+    if (m_completionPrefix.isEmpty())
+        fstrings = m_strings2;
+    else {
+        if (m_completionPrefix.isEmpty())
+            fstrings = m_strings2;
+        // if an exact match was found, then clear the completion model
+        // even if there is another potential match possible.
+        else if (m_strings2.contains(m_completionPrefix, Qt::CaseInsensitive))
+            fstrings.clear();
+        else
+            std::copy_if(m_strings2.begin(), m_strings2.end(), std::back_inserter(fstrings),
+                         [&](const QString &item) {
+                             const bool ret =
+                                     item.startsWith(m_completionPrefix, Qt::CaseInsensitive);
+                             someFilteringHappened |= !ret;
+                             return ret;
+                         });
+    }
 
     this->beginResetModel();
-    m_filteredStrings = m_maxVisibleItems > 0 ? fstrings.mid(0, m_maxVisibleItems) : fstrings;
+    m_filteredStrings = fstrings.isEmpty() ? fstrings
+            : m_maxVisibleItems > 0        ? fstrings.mid(0, m_maxVisibleItems)
+                                           : fstrings;
     this->endResetModel();
 
-    if (m_filteredStrings.isEmpty())
+    if (m_filteredStrings.isEmpty() || !someFilteringHappened)
         this->setCurrentRow(-1);
-    else {
-        m_currentRow = 0;
-        emit currentRowChanged();
+    else
+        this->setCurrentRow(0);
+}
+
+void CompletionModel::prepareStrings()
+{
+    m_strings2.clear();
+    m_priorityStrings2.clear();
+
+    if (m_acceptEnglishStringsOnly)
+        std::copy_if(m_strings.begin(), m_strings.end(), std::back_inserter(m_strings2),
+                     isEnglishString);
+    else
+        m_strings2 = m_strings;
+    m_strings2.removeDuplicates();
+
+    std::copy_if(m_priorityStrings.begin(), m_priorityStrings.end(),
+                 std::back_inserter(m_priorityStrings2), [=](const QString &item) {
+                     return m_strings2.contains(item, Qt::CaseInsensitive);
+                 });
+    m_priorityStrings2.removeDuplicates();
+
+    if (m_sortStrings)
+        std::sort(m_strings2.begin(), m_strings2.end());
+
+    for (int i = m_priorityStrings2.size() - 1; i >= 0; i--) {
+        const QString priorityString2 = m_priorityStrings2.at(i);
+        m_strings2.removeOne(priorityString2);
+        m_strings2.prepend(priorityString2);
     }
+
+    this->filterStrings();
+}
+
+void CompletionModel::clearFilterStrings()
+{
+    if (!m_filteredStrings.isEmpty()) {
+        this->beginResetModel();
+        m_filteredStrings.clear();
+        this->endResetModel();
+    }
+
+    this->setCurrentRow(-1);
 }

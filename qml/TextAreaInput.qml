@@ -18,6 +18,9 @@ import io.scrite.components 1.0
 
 TextArea {
     id: txtAreaInput
+    property bool undoRedoEnabled: false
+    property bool spellCheckEnabled: false
+
     palette: Scrite.app.palette
     selectByKeyboard: true
     selectByMouse: true
@@ -39,8 +42,72 @@ TextArea {
         }
     }
     Keys.onReturnPressed: Transliterator.transliterateLastWord()
+    Transliterator.defaultFont: font
     Transliterator.textDocument: textDocument
     Transliterator.cursorPosition: cursorPosition
     Transliterator.hasActiveFocus: activeFocus
     Transliterator.applyLanguageFonts: screenplayEditorSettings.applyUserDefinedLanguageFonts
+    Transliterator.textDocumentUndoRedoEnabled: undoRedoEnabled
+    Transliterator.spellCheckEnabled: spellCheckEnabled
+
+    SpecialSymbolsSupport {
+        anchors.top: parent.bottom
+        anchors.left: parent.left
+        textEditor: txtAreaInput
+        textEditorHasCursorInterface: true
+        enabled: !Scrite.document.readOnly
+    }
+
+    UndoHandler {
+        enabled: !txtAreaInput.readOnly && txtAreaInput.activeFocus && txtAreaInput.undoRedoEnabled
+        canUndo: txtAreaInput.canUndo
+        canRedo: txtAreaInput.canRedo
+        onUndoRequest: txtAreaInput.undo()
+        onRedoRequest: txtAreaInput.redo()
+    }
+
+    SpellingSuggestionsMenu2 { }
+
+    property var spellChecker: Transliterator.highlighter.findDelegate("SpellCheckSyntaxHighlighterDelegate")
+    ContextMenuEvent.active: spellChecker ? !spellChecker.wordUnderCursorIsMisspelled : true
+    ContextMenuEvent.mode: ContextMenuEvent.GlobalEventFilterMode
+    ContextMenuEvent.onPopup: (mouse) => {
+        if(!txtAreaInput.activeFocus) {
+            txtAreaInput.forceActiveFocus()
+            txtAreaInput.cursorPosition = txtAreaInput.positionAt(mouse.x, mouse.y)
+        }
+        __contextMenu.popup()
+    }
+
+    Menu2 {
+        id: __contextMenu
+        focus: false
+
+        property bool __persistentSelection: false
+        onAboutToShow: {
+            __persistentSelection = txtAreaInput.persistentSelection
+            txtAreaInput.persistentSelection = true
+        }
+        onAboutToHide: txtAreaInput.persistentSelection = __persistentSelection
+
+        MenuItem2 {
+            text: "Cut\t" + Scrite.app.polishShortcutTextForDisplay("Ctrl+X")
+            enabled: txtAreaInput.selectedText !== ""
+            onClicked: txtAreaInput.cut()
+            focusPolicy: Qt.NoFocus
+        }
+
+        MenuItem2 {
+            text: "Copy\t" + Scrite.app.polishShortcutTextForDisplay("Ctrl+C")
+            enabled: txtAreaInput.selectedText !== ""
+            onClicked: txtAreaInput.copy()
+            focusPolicy: Qt.NoFocus
+        }
+
+        MenuItem2 {
+            text: "Paste\t" + Scrite.app.polishShortcutTextForDisplay("Ctrl+V")
+            onClicked: txtAreaInput.paste()
+            focusPolicy: Qt.NoFocus
+        }
+    }
 }

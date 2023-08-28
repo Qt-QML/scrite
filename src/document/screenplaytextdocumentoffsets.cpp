@@ -236,7 +236,7 @@ QString ScreenplayTextDocumentOffsets::fileNameFrom(const QString &mediaFileName
         mediaFileName = mediaFileNameOrUrl;
 
     QFileInfo fi(mediaFileName);
-    return fi.absoluteDir().absoluteFilePath(fi.baseName()
+    return fi.absoluteDir().absoluteFilePath(fi.completeBaseName()
                                              + QStringLiteral(" Scrited View Offsets.json"));
 }
 
@@ -649,14 +649,10 @@ void ScreenplayTextDocumentOffsets::reloadDocument()
      * We are doing this because we want to allow some time for the UI to update itself
      * and show the busy message, before we get into a long operation.
      */
-    QTimer *reloadNowTimer = new QTimer(this);
-    reloadNowTimer->setInterval(100);
-    connect(reloadNowTimer, &QTimer::timeout, this, [=]() {
+    QTimer::singleShot(100, this, [=]() {
         this->reloadDocumentNow();
-        reloadNowTimer->deleteLater();
         this->setBusy(false);
     });
-    reloadNowTimer->start();
 }
 
 void ScreenplayTextDocumentOffsets::reloadDocumentNow()
@@ -670,9 +666,10 @@ void ScreenplayTextDocumentOffsets::reloadDocumentNow()
     m_document->setDefaultFont(m_format->defaultFont());
 
     QTextCursor cursor(m_document);
-    auto prepareCursor = [=](QTextCursor &cursor, SceneElement::Type paraType) {
+    auto prepareCursor = [=](QTextCursor &cursor, SceneElement::Type paraType,
+                             Qt::Alignment overrideAlignment) {
         const SceneElementFormat *format = m_format->elementFormat(paraType);
-        QTextBlockFormat blockFormat = format->createBlockFormat(&textWidth);
+        QTextBlockFormat blockFormat = format->createBlockFormat(overrideAlignment, &textWidth);
         QTextCharFormat charFormat = format->createCharFormat(&textWidth);
         cursor.setCharFormat(charFormat);
         cursor.setBlockFormat(blockFormat);
@@ -738,7 +735,7 @@ void ScreenplayTextDocumentOffsets::reloadDocumentNow()
         if (scene->heading()->isEnabled()) {
             if (cursor.position() > 0)
                 cursor.insertBlock();
-            prepareCursor(cursor, SceneElement::Heading);
+            prepareCursor(cursor, SceneElement::Heading, Qt::Alignment());
             polishFontsAndInsertTextAtCursor(cursor, scene->heading()->text());
         }
 
@@ -750,7 +747,7 @@ void ScreenplayTextDocumentOffsets::reloadDocumentNow()
                 cursor.insertBlock();
 
             const SceneElement *para = scene->elementAt(p);
-            prepareCursor(cursor, para->type());
+            prepareCursor(cursor, para->type(), para->alignment());
             polishFontsAndInsertTextAtCursor(cursor, para->text());
 
             switch (para->type()) {

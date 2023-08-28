@@ -15,6 +15,7 @@
 #include "hourglass.h"
 #include "screenplay.h"
 #include "application.h"
+#include "textlimiter.h"
 #include "timeprofiler.h"
 #include "scritedocument.h"
 #include "garbagecollector.h"
@@ -39,7 +40,6 @@ ScreenplayElement::ScreenplayElement(QObject *parent)
             &ScreenplayElement::elementChanged);
     connect(this, &ScreenplayElement::breakSummaryChanged, this,
             &ScreenplayElement::elementChanged);
-    connect(this, &ScreenplayElement::editorHintsChanged, this, &ScreenplayElement::elementChanged);
     connect(this, &ScreenplayElement::elementChanged, [=]() { this->markAsModified(); });
 
     connect(this, &ScreenplayElement::sceneChanged, [=]() {
@@ -240,6 +240,15 @@ void ScreenplayElement::setExpanded(bool val)
     emit expandedChanged();
 }
 
+void ScreenplayElement::setOmitted(bool val)
+{
+    if (m_omitted == val || m_elementType != SceneElementType)
+        return;
+
+    m_omitted = val;
+    emit omittedChanged();
+}
+
 void ScreenplayElement::setUserData(const QJsonValue &val)
 {
     if (m_userData == val)
@@ -249,13 +258,13 @@ void ScreenplayElement::setUserData(const QJsonValue &val)
     emit userDataChanged();
 }
 
-void ScreenplayElement::setEditorHints(const QJsonValue &val)
+void ScreenplayElement::setHeightHint(qreal val)
 {
-    if (m_editorHints == val)
+    if (qFuzzyCompare(m_heightHint, val))
         return;
 
-    m_editorHints = val;
-    emit editorHintsChanged();
+    m_heightHint = val;
+    emit heightHintChanged();
 }
 
 void ScreenplayElement::setSelected(bool val)
@@ -415,7 +424,7 @@ void ScreenplayElement::setElementIndex(int val)
 
 ///////////////////////////////////////////////////////////////////////////////
 
-static const QString coverPagePhotoPath("coverPage/photo.jpg");
+static const QString coverPagePhotoPath = QLatin1String("coverPage/photo.jpg");
 
 Screenplay::Screenplay(QObject *parent)
     : QAbstractListModel(parent),
@@ -439,9 +448,12 @@ Screenplay::Screenplay(QObject *parent)
     connect(this, &Screenplay::coverPagePhotoChanged, this, &Screenplay::screenplayChanged);
     connect(this, &Screenplay::elementsChanged, this, &Screenplay::evaluateSceneNumbersLater);
     connect(this, &Screenplay::elementsChanged, this, &Screenplay::evaluateParagraphCountsLater);
+    connect(this, &Screenplay::elementsChanged, this,
+            &Screenplay::evaluateIfHeightHintsAreAvailableLater);
     connect(this, &Screenplay::coverPagePhotoSizeChanged, this, &Screenplay::screenplayChanged);
     connect(this, &Screenplay::titlePageIsCenteredChanged, this, &Screenplay::screenplayChanged);
     connect(this, &Screenplay::screenplayChanged, [=]() {
+        this->evaluateHasTitlePageAttributes();
         this->evaluateParagraphCountsLater();
         this->evaluateWordCountLater();
         this->markAsModified();
@@ -486,8 +498,6 @@ void Screenplay::setTitle(const QString &val)
 
     m_title = val;
     emit titleChanged();
-
-    this->evaluateHasTitlePageAttributes();
 }
 
 void Screenplay::setSubtitle(const QString &val)
@@ -513,6 +523,20 @@ void Screenplay::setLogline(const QString &val)
     emit loglineChanged();
 }
 
+void Screenplay::setLoglineComments(const QString &val)
+{
+    if (m_loglineComments == val)
+        return;
+
+    ObjectPropertyInfo *info = ObjectPropertyInfo::get(this, "loglineComments");
+    QScopedPointer<PushObjectPropertyUndoCommand> cmd;
+    if (!info->isLocked())
+        cmd.reset(new PushObjectPropertyUndoCommand(this, info->property));
+
+    m_loglineComments = val;
+    emit loglineCommentsChanged();
+}
+
 void Screenplay::setBasedOn(const QString &val)
 {
     if (m_basedOn == val)
@@ -529,8 +553,6 @@ void Screenplay::setAuthor(const QString &val)
 
     m_author = val;
     emit authorChanged();
-
-    this->evaluateHasTitlePageAttributes();
 }
 
 void Screenplay::setContact(const QString &val)
@@ -585,8 +607,6 @@ void Screenplay::setVersion(const QString &val)
 
     m_version = val;
     emit versionChanged();
-
-    this->evaluateHasTitlePageAttributes();
 }
 
 bool Screenplay::isEmpty() const
@@ -614,12 +634,7 @@ bool Screenplay::isEmpty() const
             const ScreenplayElement *firstElement = m_elements.first();
             if (firstElement->elementType() == ScreenplayElement::SceneElementType) {
                 const Scene *firstScene = firstElement->scene();
-                if (firstScene->elementCount() == 0)
-                    return true;
-
-                const SceneElement *para = firstScene->elementAt(0);
-                if (para->text().isEmpty())
-                    return true;
+                return firstScene->isEmpty();
             }
         }
 
@@ -642,8 +657,21 @@ void Screenplay::setCoverPagePhoto(const QString &val)
     m_coverPagePhoto.clear();
     emit coverPagePhotoChanged();
 
-    m_coverPagePhoto = val2.isEmpty() ? val2 : m_scriteDocument->fileSystem()->absolutePath(val2);
-    emit coverPagePhotoChanged();
+    /*
+     * We need to give some time for the QML UI to unload the previously loaded
+     * image, remove that from cache and then load this new image from the disk
+     * again. The reason why we need to do this is because cover page photo has
+     * a standard path and doesnt change even if the cover page photo itself is
+     * changed.
+     *
+     * This also means that the Image {} QML elements used to show cover page
+     * photo must have their cache property set to false.
+     */
+    QTimer::singleShot(500, this, [=]() {
+        m_coverPagePhoto =
+                val2.isEmpty() ? val2 : m_scriteDocument->fileSystem()->absolutePath(val2);
+        emit coverPagePhotoChanged();
+    });
 }
 
 void Screenplay::clearCoverPagePhoto()
@@ -676,6 +704,40 @@ bool Screenplay::hasSelectedElements() const
             return true;
 
     return false;
+}
+
+void Screenplay::setSelectedElementsOmitStatus(OmitStatus val)
+{
+    for (ScreenplayElement *element : m_elements) {
+        if (element->isSelected()) {
+            switch (val) {
+            case Omitted:
+                element->setOmitted(true);
+                break;
+            case NotOmitted:
+                element->setOmitted(false);
+                break;
+            default:
+                break;
+            }
+        }
+    }
+}
+
+Screenplay::OmitStatus Screenplay::selectedElementsOmitStatus() const
+{
+    OmitStatus ret = NotOmitted;
+
+    for (ScreenplayElement *element : m_elements) {
+        if (element->isSelected()) {
+            if (element->isOmitted())
+                ret = ret == NotOmitted ? Omitted : ret;
+            else if (ret == Omitted)
+                ret = PartiallyOmitted;
+        }
+    }
+
+    return ret;
 }
 
 QQmlListProperty<ScreenplayElement> Screenplay::elements()
@@ -1090,13 +1152,10 @@ bool ScreenplayElementsMoveCommand::restore(const QVariantList &array, bool forw
             ++it;
         }
 
-        ExecLaterTimer::call(
-                "ScreenplayElementsMoveCommand::restore", m_screenplay,
-                [=]() {
-                    m_screenplay->setCurrentElementIndex(currentIndex);
-                    emit m_screenplay->requestEditorAt(currentIndex);
-                },
-                50);
+        QTimer::singleShot(50, m_screenplay, [=]() {
+            m_screenplay->setCurrentElementIndex(currentIndex);
+            emit m_screenplay->requestEditorAt(currentIndex);
+        });
     }
 
     return ret;
@@ -1172,13 +1231,10 @@ void Screenplay::moveSelectedElements(int toRow)
         ++it;
     }
 
-    ExecLaterTimer::call(
-            "moveSelectedElements", this,
-            [=]() {
-                this->setCurrentElementIndex(toRow);
-                emit this->requestEditorAt(toRow);
-            },
-            50);
+    QTimer::singleShot(50, this, [=]() {
+        this->setCurrentElementIndex(toRow);
+        emit this->requestEditorAt(toRow);
+    });
 
     if (UndoStack::active())
         UndoStack::active()->push(cmd);
@@ -1355,6 +1411,22 @@ void Screenplay::removeSelectedElements()
         this->setCurrentElementIndex(qMax(0, firstSelectedIndex - 1));
 }
 
+void Screenplay::omitSelectedElements()
+{
+    for (ScreenplayElement *element : qAsConst(m_elements)) {
+        if (element->isSelected())
+            element->setOmitted(true);
+    }
+}
+
+void Screenplay::includeSelectedElements()
+{
+    for (ScreenplayElement *element : qAsConst(m_elements)) {
+        if (element->isSelected())
+            element->setOmitted(false);
+    }
+}
+
 void Screenplay::clearSelection()
 {
     for (ScreenplayElement *element : qAsConst(m_elements))
@@ -1516,7 +1588,7 @@ void Screenplay::gatherSelectedScenes(SceneGroup *into)
 {
     into->clearScenes();
 
-    for (ScreenplayElement *element : m_elements) {
+    for (ScreenplayElement *element : qAsConst(m_elements)) {
         if (element->isSelected())
             into->addScene(element->scene());
     }
@@ -1786,7 +1858,7 @@ ScreenplayElement *Screenplay::splitElement(ScreenplayElement *ptr, SceneElement
 
         this->setCurrentElementIndex(this->indexOfElement(ret));
 
-        ptr->setEditorHints(QJsonValue());
+        ptr->setHeightHint(0);
     }
 
     if (ret != nullptr && UndoStack::active() != nullptr) {
@@ -1825,7 +1897,7 @@ ScreenplayElement *Screenplay::mergeElementWithPrevious(ScreenplayElement *eleme
     Scene *previousScene = previousSceneElement->scene();
     currentScene->mergeInto(previousScene);
 
-    previousSceneElement->setEditorHints(QJsonValue());
+    previousSceneElement->setHeightHint(0);
     screenplay->setCurrentElementIndex(previousElementIndex);
     GarbageCollector::instance()->add(element);
     return previousSceneElement;
@@ -2121,6 +2193,12 @@ void Screenplay::connectToScreenplayElementSignals(ScreenplayElement *ptr)
             Qt::UniqueConnection);
     connect(ptr, &ScreenplayElement::selectedChanged, this, &Screenplay::hasSelectedElementsChanged,
             Qt::UniqueConnection);
+    connect(ptr, &ScreenplayElement::heightHintChanged, this,
+            &Screenplay::evaluateIfHeightHintsAreAvailableLater, Qt::UniqueConnection);
+    connect(ptr, &ScreenplayElement::omittedChanged, this,
+            &Screenplay::onScreenplayElementOmittedChanged, Qt::UniqueConnection);
+    connect(ptr, &ScreenplayElement::selectedChanged, this,
+            &Screenplay::onScreenplayElementOmittedChanged, Qt::UniqueConnection);
 }
 
 void Screenplay::disconnectFromScreenplayElementSignals(ScreenplayElement *ptr)
@@ -2144,6 +2222,12 @@ void Screenplay::disconnectFromScreenplayElementSignals(ScreenplayElement *ptr)
     disconnect(ptr, &ScreenplayElement::breakTitleChanged, this, &Screenplay::breakTitleChanged);
     disconnect(ptr, &ScreenplayElement::selectedChanged, this,
                &Screenplay::hasSelectedElementsChanged);
+    disconnect(ptr, &ScreenplayElement::heightHintChanged, this,
+               &Screenplay::evaluateIfHeightHintsAreAvailableLater);
+    disconnect(ptr, &ScreenplayElement::omittedChanged, this,
+               &Screenplay::onScreenplayElementOmittedChanged);
+    disconnect(ptr, &ScreenplayElement::selectedChanged, this,
+               &Screenplay::onScreenplayElementOmittedChanged);
 }
 
 void Screenplay::setWordCount(int val)
@@ -2217,6 +2301,36 @@ bool Screenplay::getPasteDataFromClipboard(QJsonObject &clipboardJson) const
     return true;
 }
 
+void Screenplay::setHeightHintsAvailable(bool val)
+{
+    if (m_heightHintsAvailable == val)
+        return;
+
+    m_heightHintsAvailable = val;
+    emit heightHintsAvailableChanged();
+}
+
+void Screenplay::evaluateIfHeightHintsAreAvailable()
+{
+    bool available = true;
+
+    for (const ScreenplayElement *element : qAsConst(m_elements)) {
+        if (element->elementType() != ScreenplayElement::SceneElementType)
+            continue;
+
+        available &= !qFuzzyIsNull(element->heightHint());
+        if (!available)
+            break;
+    }
+
+    this->setHeightHintsAvailable(available);
+}
+
+void Screenplay::evaluateIfHeightHintsAreAvailableLater()
+{
+    m_evalHeightHintsAvailableTimer.start(100, this);
+}
+
 void Screenplay::setCurrentElementIndex(int val)
 {
     val = qBound(-1, val, m_elements.size() - 1);
@@ -2240,7 +2354,7 @@ int Screenplay::nextSceneElementIndex()
     int index = m_currentElementIndex + 1;
     while (index < m_elements.size() - 1) {
         ScreenplayElement *element = m_elements.at(index);
-        if (element->elementType() == ScreenplayElement::BreakElementType) {
+        if (element->elementType() == ScreenplayElement::BreakElementType || element->isOmitted()) {
             ++index;
             continue;
         }
@@ -2259,7 +2373,7 @@ int Screenplay::previousSceneElementIndex()
     int index = m_currentElementIndex - 1;
     while (index >= 0) {
         ScreenplayElement *element = m_elements.at(index);
-        if (element->elementType() == ScreenplayElement::BreakElementType) {
+        if (element->elementType() == ScreenplayElement::BreakElementType || element->isOmitted()) {
             --index;
             continue;
         }
@@ -2394,6 +2508,40 @@ int Screenplay::replace(const QString &text, const QString &replacementText, int
 void Screenplay::resetSceneNumbers()
 {
     this->evaluateSceneNumbers(true);
+}
+
+bool Screenplay::polishText()
+{
+    bool ret = false;
+
+    Scene *previousScene = nullptr;
+
+    for (ScreenplayElement *element : qAsConst(m_elements)) {
+        if (element->elementType() == ScreenplayElement::SceneElementType) {
+            Scene *scene = element->scene();
+            if (scene) {
+                ret |= scene->polishText(previousScene);
+                previousScene = scene;
+            }
+        }
+    }
+
+    return ret;
+}
+
+bool Screenplay::capitalizeSentences()
+{
+    bool ret = false;
+
+    for (ScreenplayElement *element : qAsConst(m_elements)) {
+        if (element->elementType() == ScreenplayElement::SceneElementType) {
+            Scene *scene = element->scene();
+            if (scene)
+                ret |= scene->capitalizeSentences();
+        }
+    }
+
+    return ret;
 }
 
 bool Screenplay::canPaste() const
@@ -2562,14 +2710,17 @@ void Screenplay::deserializeFromJson(const QJsonObject &)
 
     this->updateBreakTitlesLater();
 
+#if 0
     if (!m_scriteDocument->isCreatedOnThisComputer()) {
         for (ScreenplayElement *element : qAsConst(m_elements))
-            element->setEditorHints(QJsonValue());
+            element->setHeightHint(0);
 
         this->setCurrentElementIndex(-1);
     }
+#endif
 
     this->evaluateWordCountLater();
+    this->evaluateIfHeightHintsAreAvailableLater();
 }
 
 bool Screenplay::canSetPropertyFromObjectList(const QString &propName) const
@@ -2684,6 +2835,42 @@ void Screenplay::write(QTextCursor &cursor, const WriteOptions &options) const
             } break;
             case ScreenplayElement::BreakElementType: {
                 addSection(element->breakTitle() + QLatin1String(" - ") + element->breakSubtitle());
+
+                if ((options.actsOnNewPage && element->breakType() == Screenplay::Act)
+                    || (options.episodesOnNewPage && element->breakType() == Screenplay::Episode)) {
+                    QTextBlockFormat pageBreakFormat;
+                    pageBreakFormat.setPageBreakPolicy(QTextBlockFormat::PageBreak_AlwaysBefore);
+                    cursor.mergeBlockFormat(pageBreakFormat);
+                }
+
+                const QString breakSummary = element->breakSummary();
+                if (!breakSummary.isEmpty()) {
+                    QTextBlockFormat blockFormat;
+                    QTextCharFormat charFormat;
+                    cursor.insertBlock(blockFormat, charFormat);
+                    cursor.insertText(QLatin1String("Summary: ") + breakSummary);
+                }
+
+                Notes *notes = element->notes();
+                if (notes) {
+                    const int cp1 = cursor.position();
+                    Notes::WriteOptions options;
+                    notes->write(cursor, options);
+                    const int cp2 = cursor.position();
+
+                    cursor.setPosition(cp1);
+                    cursor.movePosition(QTextCursor::NextBlock);
+
+                    while (cursor.position() < cp2) {
+                        QTextBlockFormat blockFormat = cursor.blockFormat();
+                        blockFormat.setIndent(blockFormat.indent() + 1);
+                        cursor.setBlockFormat(blockFormat);
+                        if (!cursor.movePosition(QTextCursor::NextBlock))
+                            break;
+                    }
+
+                    cursor.setPosition(cp2);
+                }
             } break;
             }
         }
@@ -2712,6 +2899,12 @@ void Screenplay::timerEvent(QTimerEvent *te)
     } else if (te->timerId() == m_wordCountTimer.timerId()) {
         m_wordCountTimer.stop();
         this->evaluateWordCount();
+    } else if (te->timerId() == m_evalHeightHintsAvailableTimer.timerId()) {
+        m_evalHeightHintsAvailableTimer.stop();
+        this->evaluateIfHeightHintsAreAvailable();
+    } else if (te->timerId() == m_selectedElementsOmitStatusChangedTimer.timerId()) {
+        m_selectedElementsOmitStatusChangedTimer.stop();
+        emit selectedElementsOmitStatusChanged();
     }
 }
 
@@ -2733,6 +2926,24 @@ void Screenplay::onSceneReset(int elementIndex)
         return;
 
     emit sceneReset(sceneIndex, elementIndex);
+}
+
+void Screenplay::onScreenplayElementOmittedChanged()
+{
+    ScreenplayElement *element = qobject_cast<ScreenplayElement *>(this->sender());
+    if (element == nullptr)
+        return;
+
+    int sceneIndex = this->indexOfElement(element);
+    if (sceneIndex < 0)
+        return;
+
+    if (element->isOmitted())
+        emit elementOmitted(element, sceneIndex);
+    else
+        emit elementIncluded(element, sceneIndex);
+
+    m_selectedElementsOmitStatusChangedTimer.start(10, this);
 }
 
 void Screenplay::updateBreakTitlesLater()
@@ -2910,8 +3121,8 @@ void Screenplay::setHasTitlePageAttributes(bool val)
 
 void Screenplay::evaluateHasTitlePageAttributes()
 {
-    this->setHasTitlePageAttributes(!m_title.isEmpty() && !m_author.isEmpty()
-                                    && !m_version.isEmpty());
+    this->setHasTitlePageAttributes(!m_title.isEmpty() || !m_author.isEmpty()
+                                    || !m_version.isEmpty());
 }
 
 void Screenplay::staticAppendElement(QQmlListProperty<ScreenplayElement> *list,

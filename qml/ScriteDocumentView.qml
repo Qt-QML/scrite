@@ -19,8 +19,8 @@ import QtQuick.Layouts 1.15
 import Qt.labs.settings 1.0
 import QtQuick.Controls 2.15
 import QtQuick.Controls.Material 2.15
-
 import io.scrite.components 1.0
+import "../js/utils.js" as Utils
 
 Item {
     id: documentUI
@@ -45,7 +45,7 @@ Item {
     property bool canShowNotebookInStructure: width > 1600
     property bool showNotebookInStructure: workspaceSettings.showNotebookInStructure && canShowNotebookInStructure
     onShowNotebookInStructureChanged: {
-        Scrite.app.execLater(workspaceSettings, 100, function() {
+        Utils.execLater(workspaceSettings, 100, function() {
             mainTabBar.currentIndex = mainTabBar.currentIndex % (showNotebookInStructure ? 2 : 3)
         })
     }
@@ -68,6 +68,11 @@ Item {
     AppFeature {
         id: crgraphAppFeature
         feature: Scrite.RelationshipGraphFeature
+    }
+
+    AppFeature {
+        id: watermarkFeature
+        feature: Scrite.WatermarkFeature
     }
 
     Settings {
@@ -119,10 +124,17 @@ Item {
         property bool displaySceneCharacters: true
         property bool displaySceneSynopsis: true
         property bool displaySceneComments: false
+        property bool displayEmptyTitleCard: true
+        property bool displayAddSceneBreakButtons: true
         property int mainEditorZoomValue: -1
         property int embeddedEditorZoomValue: -1
+        property bool autoAdjustEditorWidthInScreenplayEditor: true
+        property var zoomLevelModifiers: { "tab0": 0, "tab1": 0, "tab2": 0, "tab3": 0 }
         property bool includeTitlePageInPreview: true
+        property bool singleClickAutoComplete: true
         property bool enableSpellCheck: true // Since this is now fixed: https://github.com/teriflix/scrite/issues/138
+        property bool enableAutoCapitalizeSentences: true
+        property bool enableAutoPolishParagraphs: true // for automatically adding/removing CONT'D where appropriate
         property int lastLanguageRefreshNoticeBoxTimestamp: 0
         property int lastSpellCheckRefreshNoticeBoxTimestamp: 0
         property bool showLanguageRefreshNoticeBox: true
@@ -131,11 +143,12 @@ Item {
         property bool allowTaggingOfScenes: false
         property real spaceBetweenScenes: 0
         property int commentsPanelTabIndex: 1
-        property bool textFormatDockVisible: true
+        property bool markupToolsDockVisible: true
 
         property bool pausePageAndTimeComputation: false
         property bool highlightCurrentLine: true
         property bool applyUserDefinedLanguageFonts: true
+        property bool optimiseScrolling: false
     }
 
     Settings {
@@ -322,7 +335,7 @@ Item {
                     Announcement.shout("190B821B-50FE-4E47-A4B2-BDBB2A13B72C", "Notebook")
                 else {
                     mainTabBar.activateTab(1)
-                    Scrite.app.execLater(mainTabBar, 250, function() {
+                    Utils.execLater(mainTabBar, 250, function() {
                         Announcement.shout("190B821B-50FE-4E47-A4B2-BDBB2A13B72C", "Notebook")
                     })
                 }
@@ -348,7 +361,7 @@ Item {
             var nbt = showNotebookInStructure ? 1 : 2
             if(mainTabBar.currentIndex !== nbt) {
                 mainTabBar.activateTab(nbt)
-                Scrite.app.execLater(mainTabBar, 250, function() {
+                Utils.execLater(mainTabBar, 250, function() {
                     Announcement.shout("190B821B-50FE-4E47-A4B2-BDBB2A13B72C", type)
                 })
             } else
@@ -406,22 +419,18 @@ Item {
             instanceSettings.firstSwitchToStructureTab = true
             appBusyOverlay.ref()
             screenplayAdapter.initialLoadTreshold = 25
-            Scrite.app.execLater(screenplayAdapter, 250, function() {
-                appBusyOverlay.deref()
-                screenplayAdapter.sessionId = Scrite.document.sessionId
-            })
+            Utils.execLater(screenplayAdapter, 250, () => {
+                                appBusyOverlay.deref()
+                                screenplayAdapter.sessionId = Scrite.document.sessionId
+                            })
         }
         function onJustLoaded() {
             instanceSettings.firstSwitchToStructureTab = true
             var firstElement = Scrite.document.screenplay.elementAt(Scrite.document.screenplay.firstSceneIndex())
             if(firstElement) {
                 var editorHints = firstElement.editorHints
-                if(editorHints) {
+                if(editorHints)
                     screenplayAdapter.initialLoadTreshold = -1
-                    screenplayEditorSettings.displaySceneCharacters = editorHints.displaySceneCharacters
-                    screenplayEditorSettings.displaySceneSynopsis = editorHints.displaySceneSynopsis
-                    return
-                }
             }
         }
     }
@@ -454,8 +463,8 @@ Item {
 
     ScreenplayTextDocument {
         id: screenplayTextDocument
-        screenplay: Scrite.document.loading || paused ? null : (editor ? screenplayAdapter.screenplay : null)
-        formatting: Scrite.document.loading || paused ? null : (editor ? Scrite.document.printFormat : null)
+        screenplay: Scrite.document.loading || paused ? null : screenplayAdapter.screenplay
+        formatting: Scrite.document.loading || paused ? null : Scrite.document.printFormat
         property bool paused: screenplayEditorSettings.pausePageAndTimeComputation
         onPausedChanged: Qt.callLater( function() {
             screenplayEditorSettings.pausePageAndTimeComputation = screenplayTextDocument.paused
@@ -470,8 +479,9 @@ Item {
         secondsPerPage: Scrite.document.printFormat.secondsPerPage
         property Item editor
         property bool overlayRefCountModified: false
+        property bool requiresAppBusyOverlay: mainUndoStack.screenplayEditorActive || mainUndoStack.sceneEditorActive
         onUpdateScheduled: {
-            if(mainUndoStack.screenplayEditorActive || mainUndoStack.sceneEditorActive) {
+            if(requiresAppBusyOverlay && !overlayRefCountModified) {
                 appBusyOverlay.ref()
                 overlayRefCountModified = true
             }
@@ -481,6 +491,13 @@ Item {
                 appBusyOverlay.deref()
             overlayRefCountModified = false
         }
+        onRequiresAppBusyOverlayChanged: {
+            if(!requiresAppBusyOverlay && overlayRefCountModified) {
+                appBusyOverlay.deref()
+                overlayRefCountModified = false
+            }
+        }
+
         Component.onCompleted: Scrite.app.registerObject(screenplayTextDocument, "screenplayTextDocument")
     }
 
@@ -517,7 +534,6 @@ Item {
                 iconSource: "../icons/action/description.png"
                 text: "New"
                 shortcut: "Ctrl+N"
-                shortcutText: "N"
                 onClicked: {
                     if(Scrite.document.autoSave && Scrite.document.fileName !== "")
                         Scrite.document.save()
@@ -540,7 +556,7 @@ Item {
                                 contentLoader.allowContent = false
                                 Scrite.document.reset()
                                 contentLoader.allowContent = true
-                                Scrite.app.execLater(fileNewButton, 250, newFromTemplate)
+                                Utils.execLater(fileNewButton, 250, newFromTemplate)
                             }
                         }, fileNewButton)
                     else
@@ -557,7 +573,6 @@ Item {
                 iconSource: "../icons/file/folder_open.png"
                 text: "Open"
                 shortcut: "Ctrl+O"
-                shortcutText: "O"
                 down: recentFilesMenu.visible
                 onClicked: recentFilesMenu.open()
 
@@ -585,7 +600,7 @@ Item {
                                     }
                                     recentFilesMenu.close()
                                     if(filePath === "#TEMPLATE")
-                                        Scrite.app.execLater(fileOpenButton, 250, newFromTemplate)
+                                        Utils.execLater(fileOpenButton, 250, newFromTemplate)
                                     else
                                         fileDialog.launch("OPEN", filePath)
                                 }
@@ -593,7 +608,7 @@ Item {
                     else {
                         recentFilesMenu.close()
                         if(filePath === "#TEMPLATE")
-                            Scrite.app.execLater(fileOpenButton, 250, newFromTemplate)
+                            Utils.execLater(fileOpenButton, 250, newFromTemplate)
                         else
                             fileDialog.launch("OPEN", filePath)
                     }
@@ -615,55 +630,29 @@ Item {
                     Settings {
                         fileName: Scrite.app.settingsFilePath
                         category: "RecentFiles"
-                        property alias files: recentFilesMenu.recentFiles
+                        property alias files: recentFilesModel.files
+                    }
+
+                    RecentFileListModel {
+                        id: recentFilesModel
+
+                        function addLater(filePath) {
+                            Utils.execLater(recentFilesModel, 50, () => { recentFilesModel.add(filePath) } )
+                        }
                     }
 
                     Menu2 {
                         id: recentFilesMenu
-                        width: recentFiles.length > 1 ? 400 : 200
+                        width: recentFilesModel.count > 1 ? 400 : 200
 
                         Connections {
                             target: Scrite.document
                             function onJustLoaded() { Qt.callLater( ()=> {
                                                                        if(Scrite.document.fileName !== "")
-                                                                            recentFilesMenu.add(Scrite.document.fileName)
+                                                                            recentFilesModel.add(Scrite.document.fileName)
                                                                    } )
                             }
                         }
-
-                        property int nrRecentFiles: recentFiles.length
-                        property var recentFiles: []
-                        function add(filePath) {
-                            if(filePath === "")
-                                return
-                            var r = recentFiles
-                            if(r.length > 0 && r[r.length-1] === filePath)
-                                return
-                            for(var i=0; i<r.length; i++) {
-                                if(r[i] === filePath)
-                                    r.splice(i,1);
-                            }
-                            r.push(filePath)
-                            if(r.length > 10)
-                                r.splice(0, r.length-10)
-                            recentFiles = r
-                        }
-
-                        function prepareRecentFilesList() {
-                            var newFiles = []
-                            var filesDropped = false
-                            recentFilesMenu.recentFiles.forEach(function(filePath) {
-                                var fi = Scrite.app.fileInfo(filePath)
-                                if(fi.exists)
-                                    newFiles.push(filePath)
-                                else
-                                    filesDropped = true
-                            })
-                            if(filesDropped)
-                                recentFilesMenu.recentFiles = newFiles
-                        }
-
-                        onAboutToShow: prepareRecentFilesList()
 
                         MenuItem2 {
                             text: "Open..."
@@ -693,12 +682,13 @@ Item {
                         }
 
                         Repeater {
-                            model: recentFilesMenu.recentFiles
+                            model: recentFilesModel
 
                             MenuItem2 {
-                                property string filePath: recentFilesMenu.recentFiles[recentFilesMenu.nrRecentFiles-index-1]
-                                property var fileInfo: Scrite.app.fileInfo(filePath)
-                                text: recentFilesFontMetrics.elidedText(fileInfo.baseName, Qt.ElideMiddle, recentFilesMenu.width)
+                                required property string fileName
+                                required property string filePath
+                                required property string fileBaseName
+                                text: recentFilesFontMetrics.elidedText(fileBaseName, Qt.ElideMiddle, recentFilesMenu.width)
                                 ToolTip.text: filePath
                                 ToolTip.visible: hovered
                                 onClicked: fileOpenButton.doOpen(filePath)
@@ -740,7 +730,6 @@ Item {
                 iconSource: "../icons/content/save.png"
                 text: "Save"
                 shortcut: "Ctrl+S"
-                shortcutText: "S"
                 enabled: Scrite.document.modified && !Scrite.document.readOnly
                 onClicked: doClick()
                 function doClick() {
@@ -761,7 +750,6 @@ Item {
             ToolButton3 {
                 text: "Save As"
                 shortcut: "Ctrl+Shift+S"
-                shortcutText: "Shift+S"
                 iconSource: "../icons/content/save_as.png"
                 onClicked: fileDialog.launch("SAVE")
                 enabled: Scrite.document.structure.elementCount > 0 ||
@@ -778,7 +766,6 @@ Item {
                 iconSource: "../icons/action/library.png"
                 text: "<img src=\"qrc:/images/library_woicon_inverted.png\" height=\"30\" width=\"107\">\t&nbsp;"
                 shortcut: "Ctrl+Shift+O"
-                shortcutText: "Shift+O"
                 function go() {
                     modalDialog.closeable = false
                     modalDialog.popupSource = openFromLibrary
@@ -805,7 +792,7 @@ Item {
                                         return
                                     }
                                 }
-                                Scrite.app.execLater(openFromLibrary, 250, function() { openFromLibrary.go() })
+                                Utils.execLater(openFromLibrary, 250, function() { openFromLibrary.go() })
                             }
                         }, fileNewButton)
                     else
@@ -1119,7 +1106,7 @@ Item {
                                 const idata = data
                                 if(stype === "72892ED6-BA58-47EC-B045-E92D9EC1C47A") {
                                     if(idata && typeof idata === "number")
-                                        Scrite.app.execLater(ui, idata, showAboutDialog)
+                                        Utils.execLater(ui, idata, showAboutDialog)
                                     else
                                         showAboutDialog()
                                 }
@@ -1135,14 +1122,14 @@ Item {
                         MenuItem2 {
                             text: "Toggle Fullscreen\tF7"
                             icon.source: "../icons/navigation/fullscreen.png"
-                            onClicked: Scrite.app.execLater(Scrite.app, 100, function() { Scrite.app.toggleFullscreen(Scrite.window) })
+                            onClicked: Utils.execLater(Scrite.app, 100, function() { Scrite.app.toggleFullscreen(Scrite.window) })
                             ShortcutsModelItem.group: "Application"
                             ShortcutsModelItem.title: "Toggle Fullscreen"
                             ShortcutsModelItem.shortcut: "F7"
                             Shortcut {
                                 context: Qt.ApplicationShortcut
                                 sequence: "F7"
-                                onActivated: Scrite.app.execLater(Scrite.app, 100, function() { Scrite.app.toggleFullscreen(Scrite.window) })
+                                onActivated: Utils.execLater(Scrite.app, 100, function() { Scrite.app.toggleFullscreen(Scrite.window) })
                             }
                         }
                     }
@@ -1161,7 +1148,6 @@ Item {
                 iconSource: "../icons/content/language.png"
                 text: Scrite.app.transliterationEngine.languageAsString
                 shortcut: "Ctrl+L"
-                shortcutText: "L"
                 ToolTip.text: Scrite.app.polishShortcutTextForDisplay("Language Transliteration" + "\t" + shortcut)
                 onClicked: languageMenu.visible = true
                 down: languageMenu.visible
@@ -1259,7 +1245,6 @@ Item {
                 iconSource: down ? "../icons/hardware/keyboard_hide.png" : "../icons/hardware/keyboard.png"
                 ToolTip.text: "Show English to " + Scrite.app.transliterationEngine.languageAsString + " alphabet mappings.\t" + Scrite.app.polishShortcutTextForDisplay(shortcut)
                 shortcut: "Ctrl+K"
-                shortcutText: "K"
                 onClicked: alphabetMappingsPopup.visible = !alphabetMappingsPopup.visible
                 down: alphabetMappingsPopup.visible
                 enabled: Scrite.app.transliterationEngine.language !== TransliterationEngine.English
@@ -1373,15 +1358,16 @@ Item {
 
                             Menu2 {
                                 title: "Recent"
-                                onAboutToShow: recentFilesMenu.prepareRecentFilesList()
                                 width: Math.min(documentUI.width * 0.75, 350)
 
                                 Repeater {
-                                    model: recentFilesMenu.recentFiles
+                                    model: recentFilesModel
 
                                     MenuItem2 {
-                                        property string filePath: recentFilesMenu.recentFiles[recentFilesMenu.recentFiles.length-index-1]
-                                        text: recentFilesFontMetrics.elidedText("" + (index+1) + ". " + Scrite.app.fileInfo(filePath).baseName, Qt.ElideMiddle, recentFilesMenu.width)
+                                        required property string fileName
+                                        required property string filePath
+                                        required property string fileBaseName
+                                        text: recentFilesFontMetrics.elidedText(fileBaseName, Qt.ElideMiddle, recentFilesMenu.width)
                                         ToolTip.text: filePath
                                         ToolTip.visible: hovered
                                         onClicked: fileOpenButton.doOpen(filePath)
@@ -1502,7 +1488,7 @@ Item {
 
                         MenuSeparator { }
 
-                        Menu {
+                        Menu2 {
                             title: "View"
                             width: 250
 
@@ -1616,7 +1602,7 @@ Item {
                     var message = "Preparing the <b>" + tabs[index].name + "</b> tab, just a few seconds ..."
                     Scrite.document.setBusyMessage(message)
                     Scrite.document.screenplay.clearSelection()
-                    Scrite.app.execLater(mainTabBar, 100, function() {
+                    Utils.execLater(mainTabBar, 100, function() {
                         mainTabBar.currentIndex = index
                         Scrite.document.clearBusyMessage()
                     })
@@ -1807,6 +1793,7 @@ Item {
         property string pdfDownloadFilePath
         property string pdfTitle
         property int pdfPagesPerRow: 2
+        property bool pdfSaveAllowed: true
         enabled: !notificationsView.visible
         onActiveChanged: {
             if(!active) {
@@ -1817,12 +1804,13 @@ Item {
             }
         }
 
-        function show(title, filePath, dlFilePath, pagesPerRow) {
+        function show(title, filePath, dlFilePath, pagesPerRow, allowSave) {
             active = false
             pdfTitle = title
             pdfPagesPerRow = pagesPerRow
             pdfDownloadFilePath = dlFilePath
             pdfFilePath = filePath
+            pdfSaveAllowed = allowSave === undefined ? true : allowSave
             Qt.callLater( function() {
                 pdfViewer.active = true
             })
@@ -1838,7 +1826,8 @@ Item {
         sourceComponent: PdfView {
             source: Scrite.app.localFileToUrl(pdfViewer.pdfFilePath)
             saveFilePath: pdfViewer.pdfDownloadFilePath
-            allowFileSave: true
+            allowFileSave: pdfViewer.pdfSaveAllowed
+            saveFeatureDisabled: !pdfViewer.pdfSaveAllowed
             pagesPerRow: pdfViewer.pdfPagesPerRow
             allowFileReveal: false
 
@@ -1956,7 +1945,7 @@ Item {
                                              const stype = "" + type
                                              if(mainTabBar.currentIndex === 0 && stype === "{f4048da2-775d-11ec-90d6-0242ac120003}") {
                                                  uiLoader.active = false
-                                                 Scrite.app.execLater(uiLoader, 250, function() {
+                                                 Utils.execLater(uiLoader, 250, function() {
                                                     uiLoader.active = true
                                                  })
                                              }
@@ -1969,6 +1958,8 @@ Item {
         id: screenplayEditorComponent
 
         ScreenplayEditor {
+            id: screenplayEditor
+
             HelpTipNotification {
                 tipName: "screenplay"
             }
@@ -2017,8 +2008,28 @@ Item {
                     return _value - _oneValue
                 }
 
-                zoomLevelModifier = evalZoomLevelModifierFn()
-            }            
+                if(screenplayEditorSettings.autoAdjustEditorWidthInScreenplayEditor)
+                    zoomLevelModifier = evalZoomLevelModifierFn()
+                else {
+                    const zlms = screenplayEditorSettings.zoomLevelModifiers
+                    const zlm = zlms["tab"+mainTabBar.currentIndex]
+                    if(zlm !== undefined)
+                        zoomLevelModifier = zlm
+                }
+
+                trackZoomLevelChanges.enabled = true
+            }
+
+            Connections {
+                id: trackZoomLevelChanges
+                enabled: false
+                target: screenplayEditor
+                function onZoomLevelChanged() {
+                    var zlms = screenplayEditorSettings.zoomLevelModifiers
+                    zlms["tab"+mainTabBar.currentIndex] = zoomLevelModifierToApply()
+                    screenplayEditorSettings.zoomLevelModifiers = zlms
+                }
+            }
 
             additionalCharacterMenuItems: {
                 if(mainTabBar.currentIndex === 1) {
@@ -2053,6 +2064,101 @@ Item {
             onAdditionalSceneMenuItemClicked: {
                 if(menuItemName === "Scene Notes")
                     Announcement.shout("41EE5E06-FF97-4DB6-B32D-F938418C9529", undefined)
+            }
+
+            AttachmentsDropArea {
+                id: fileOpenDropArea
+                anchors.fill: parent
+                enabled: !modalDialog.active
+                allowedType: Attachments.NoMedia
+                allowedExtensions: ["scrite", "fdx", "txt", "fountain", "html"]
+                property string droppedFilePath
+                property string droppedFileName
+                onDropped: {
+                    if(Scrite.document.empty)
+                        Scrite.document.openOrImport(attachment.filePath)
+                    else {
+                        droppedFilePath = attachment.filePath
+                        droppedFileName = attachment.originalFileName
+                    }
+                }
+
+                Loader {
+                    id: fileOpenDropAreaNotification
+                    anchors.fill: fileOpenDropArea
+                    active: fileOpenDropArea.active || fileOpenDropArea.droppedFilePath !== ""
+                    onActiveChanged: appToolBarArea.enabled = !active
+                    Component.onDestruction: appToolBarArea.enabled = true
+                    sourceComponent: Rectangle {
+                        color: Scrite.app.translucent(primaryColors.c500.background, 0.5)
+
+                        Rectangle {
+                            anchors.fill: fileOpenDropAreaNotice
+                            anchors.margins: -30
+                            radius: 4
+                            color: primaryColors.c700.background
+                        }
+
+                        Column {
+                            id: fileOpenDropAreaNotice
+                            anchors.centerIn: parent
+                            width: parent.width * 0.5
+                            spacing: 20
+
+                            Text {
+                                wrapMode: Text.WordWrap
+                                width: parent.width
+                                color: primaryColors.c700.text
+                                font.bold: true
+                                text: parent.visible ? fileOpenDropArea.active ? fileOpenDropArea.attachment.originalFileName : fileOpenDropArea.droppedFileName : ""
+                                horizontalAlignment: Text.AlignHCenter
+                                font.pointSize: Scrite.app.idealFontPointSize
+                            }
+
+                            Text {
+                                width: parent.width
+                                wrapMode: Text.WordWrap
+                                color: primaryColors.c700.text
+                                horizontalAlignment: Text.AlignHCenter
+                                font.pointSize: Scrite.app.idealFontPointSize
+                                text: fileOpenDropArea.active ? "Drop the file here to open/import it." : "Do you want to open, import or cancel?"
+                            }
+
+                            Text {
+                                width: parent.width
+                                wrapMode: Text.WordWrap
+                                color: primaryColors.c700.text
+                                horizontalAlignment: Text.AlignHCenter
+                                font.pointSize: Scrite.app.idealFontPointSize
+                                visible: !Scrite.document.empty || Scrite.document.fileName !== ""
+                                text: "NOTE: Any unsaved changes in the currently open document will be discarded."
+                            }
+
+                            Row {
+                                spacing: 20
+                                anchors.horizontalCenter: parent.horizontalCenter
+                                visible: !Scrite.document.empty
+
+                                Button2 {
+                                    text: "Open/Import"
+                                    onClicked: {
+                                        Scrite.document.openOrImport(fileOpenDropArea.droppedFilePath)
+                                        fileOpenDropArea.droppedFileName = ""
+                                        fileOpenDropArea.droppedFilePath = ""
+                                    }
+                                }
+
+                                Button2 {
+                                    text: "Cancel"
+                                    onClicked:  {
+                                        fileOpenDropArea.droppedFileName = ""
+                                        fileOpenDropArea.droppedFilePath = ""
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
     }
@@ -2100,19 +2206,19 @@ Item {
                                         else if(sdata.startsWith("Notebook")) {
                                             structureEditorTabs.currentTabIndex = 1
                                             if(sdata !== "Notebook")
-                                                Scrite.app.execLater(notebookViewLoader, 100, function() {
+                                                Utils.execLater(notebookViewLoader, 100, function() {
                                                     notebookViewLoader.item.switchTo(sdata)
                                                 })
                                         }
                                     } else if(stype === "7D6E5070-79A0-4FEE-8B5D-C0E0E31F1AD8") {
                                         structureEditorTabs.currentTabIndex = 1
-                                        Scrite.app.execLater(notebookViewLoader, 100, function() {
+                                        Utils.execLater(notebookViewLoader, 100, function() {
                                             notebookViewLoader.item.switchToCharacterTab(data)
                                         })
                                     }
                                     else if(stype === "41EE5E06-FF97-4DB6-B32D-F938418C9529") {
                                         structureEditorTabs.currentTabIndex = 1
-                                        Scrite.app.execLater(notebookViewLoader, 100, function() {
+                                        Utils.execLater(notebookViewLoader, 100, function() {
                                             notebookViewLoader.item.switchToSceneTab(data)
                                         })
                                     }
@@ -2416,7 +2522,7 @@ Item {
                 }
 
                 if(structureCanvasSettings.showPullHandleAnimation && contentLoader.sessionId !== Scrite.document.sessionId) {
-                    Scrite.app.execLater(splitViewAnimationLoader, 250, function() {
+                    Utils.execLater(splitViewAnimationLoader, 250, function() {
                         splitViewAnimationLoader.active = !screenplayEditor2.active || !structureEditorRow2.active
                     })
                     contentLoader.sessionId = Scrite.document.sessionId
@@ -2541,7 +2647,7 @@ Item {
                         contentLoader.allowContent = false
                         Scrite.document.open(path)
                         contentLoader.allowContent = true
-                        recentFilesMenu.add(path)
+                        recentFilesModel.add(path)
                     },
                     "reset": true,
                     "notificationTitle": "Opening Scrite Project"
@@ -2551,7 +2657,7 @@ Item {
                     "selectExisting": false,
                     "callback": function(path) {
                         Scrite.document.saveAs(path)
-                        recentFilesMenu.add(path)
+                        recentFilesModel.add(path)
                     },
                     "reset": false,
                     "notificationTitle": "Saving Scrite Project"
@@ -2582,7 +2688,7 @@ Item {
             folder = mode === "IMPORT" ? workspaceSettings.lastOpenImportFolderUrl : workspaceSettings.lastOpenFolderUrl
 
             if(filePath)
-                Scrite.app.execLater(Scrite.window, 250, function() { processFile(filePath) } )
+                Utils.execLater(Scrite.window, 250, function() { processFile(filePath) } )
             else {
                 var modeInfo = modes[mode]
                 if(modeInfo["reset"] === true) {
@@ -2643,14 +2749,14 @@ Item {
             onOpenInThisWindow: {
                 contentLoader.allowContent = false
                 Scrite.document.openAnonymously(filePath)
-                Scrite.app.execLater(contentLoader, 50, function() {
+                Utils.execLater(contentLoader, 50, function() {
                     contentLoader.allowContent = true
                     modalDialog.close()
                 })
             }
             onOpenInNewWindow: {
                 Scrite.app.launchNewInstanceAndOpenAnonymously(Scrite.window, filePath)
-                Scrite.app.execLater(modalDialog, 4000, function() {
+                Utils.execLater(modalDialog, 4000, function() {
                     modalDialog.close()
                 })
             }
@@ -2664,7 +2770,7 @@ Item {
             onOpenRequest: (filePath) => {
                                contentLoader.allowContent = false
                                Scrite.document.openAnonymously(filePath)
-                               Scrite.app.execLater(contentLoader, 50, function() {
+                               Utils.execLater(contentLoader, 50, function() {
                                    contentLoader.allowContent = true
                                    modalDialog.close()
                                })
@@ -2811,8 +2917,12 @@ Item {
         anchors.fill: parent
         busyMessage: "Computing Page Layout, Evaluating Page Count & Time ..."
         visible: RefCounter.isReffed
-        function ref() { RefCounter.ref() }
-        function deref() { RefCounter.deref() }
+        function ref() {
+            RefCounter.ref()
+        }
+        function deref() {
+            RefCounter.deref()
+        }
     }
 
     HelpTipNotification {

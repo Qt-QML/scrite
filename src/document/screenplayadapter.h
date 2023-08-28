@@ -76,6 +76,10 @@ public:
     int wordCount() const;
     Q_SIGNAL void wordCountChanged();
 
+    Q_PROPERTY(bool heightHintsAvailable READ isHeightHintsAvailable NOTIFY heightHintsAvailableChanged)
+    bool isHeightHintsAvailable() const;
+    Q_SIGNAL void heightHintsAvailableChanged();
+
     Q_PROPERTY(int initialLoadTreshold READ initialLoadTreshold WRITE setInitialLoadTreshold NOTIFY
                        initialLoadTresholdChanged)
     void setInitialLoadTreshold(int val);
@@ -98,7 +102,7 @@ public:
         SceneRole,
         ModelDataRole
     };
-    Q_ENUMS(Roles)
+    Q_ENUM(Roles)
     QHash<int, QByteArray> roleNames() const;
     QVariant data(const QModelIndex &index, int role) const;
     int rowCount(const QModelIndex &parent = QModelIndex()) const;

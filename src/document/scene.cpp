@@ -38,6 +38,9 @@
 #include <QTextBoundaryFinder>
 #include <QScopedValueRollback>
 #include <QAbstractTextDocumentLayout>
+#include <QQuickWindow>
+#include <QSGOpaqueTextureMaterial>
+#include <QPainter>
 
 static QDataStream &operator<<(QDataStream &ds, const QTextLayout::FormatRange &formatRange)
 {
@@ -154,6 +157,7 @@ Scene *SceneUndoCommand::fromByteArray(const QByteArray &bytes) const
 
 class PushSceneUndoCommand
 {
+    friend class SceneElement;
     static UndoStack *allowedStack;
 
 public:
@@ -474,6 +478,18 @@ void SceneElement::setText(const QString &val)
     this->evaluateWordCountLater();
 }
 
+void SceneElement::setAlignment(Qt::Alignment val)
+{
+    if (m_alignment == val)
+        return;
+
+    m_alignment = val;
+    emit alignmentChanged();
+
+    this->reportSceneElementChanged(
+            Scene::ElementTypeChange); // because the text hasnt technically changed.
+}
+
 void SceneElement::setCursorPosition(int val)
 {
     m_scene->setCursorPosition(val);
@@ -506,6 +522,218 @@ QString SceneElement::formattedText() const
     }
 
     return m_text;
+}
+
+bool SceneElement::polishText(Scene *previousScene)
+{
+    Q_UNUSED(previousScene)
+
+    if (m_scene == nullptr)
+        return false;
+
+    /**
+     * This function is called when the user is done editing a scene element and goes on to another
+     * paragraph. At this point, we can polish the text. What does polish mean?
+     *
+     * For instance, if we have two character paragraphs one after the other, except for the first
+     * one the subsequent ones can have (CONT'D) suffix, if it doesn't already have. And if there
+     * is a CONT'D added by mistake, we can remove it.
+     *
+     * Another instance, transition paragraphs must end with :. If they don't then we can append
+     * one.
+     */
+    QString polishedText = m_text;
+
+    if (m_type == SceneElement::Shot || m_type == SceneElement::Transition) {
+        const QString colon = QLatin1String(":");
+        polishedText = polishedText.trimmed().toUpper();
+        if (!polishedText.endsWith(colon))
+            polishedText += colon;
+    }
+
+    const QString openB = QLatin1String("(");
+    const QString closeB = QLatin1String(")");
+
+    if (m_type == SceneElement::Character) {
+        polishedText = polishedText.simplified().toUpper();
+
+        const QString contd = QLatin1String("CONT'D");
+        const QString openB2 = QLatin1String(" (");
+        const int openBIndex = polishedText.indexOf(openB);
+
+        // There should be a space before (
+        if (openBIndex > 0) {
+            const QChar ch = polishedText.at(openBIndex - 1);
+            if (ch.category() != QChar::Separator_Space)
+                polishedText = polishedText.insert(openBIndex, QChar(' '));
+        }
+
+        // If there is ( then there must be a )
+        if (openBIndex >= 0) {
+            if (!polishedText.endsWith(closeB))
+                polishedText += closeB;
+        }
+
+        // If previous character name is same as current one then add CONT'D
+        // Otherwise, remove CONT'D if present.
+        const SceneElement *prevCharElement = [&]() -> SceneElement * {
+            const int myIndex = m_scene->indexOfElement(this);
+            for (int i = myIndex - 1; i >= 0; i--) {
+                SceneElement *prevElement = m_scene->elementAt(i);
+                if (prevElement->type() == SceneElement::Character)
+                    return prevElement;
+            }
+
+#if 0 // Making this work across multiple scenes is rather controversial. Let's not do this right
+      // now.
+            if (previousScene != nullptr) {
+                for (int i = previousScene->elementCount() - 1; i >= 0; i--) {
+                    SceneElement *prevElement = previousScene->elementAt(i);
+                    if (prevElement->type() == SceneElement::Character)
+                        return prevElement;
+                }
+            }
+#endif
+            return nullptr;
+        }();
+
+        const QString myCharacterName = polishedText.section('(', 0, 0).trimmed();
+
+        auto removeContd = [&]() {
+            const QString comma = QLatin1String(",");
+            QString suffix = polishedText.section('(', 1, -1).trimmed();
+            if (suffix.endsWith(closeB))
+                suffix = suffix.left(suffix.length() - 1);
+            suffix.remove(contd, Qt::CaseInsensitive);
+            suffix = suffix.simplified();
+            if (!suffix.isEmpty()) {
+                suffix.replace(QLatin1String(",,"), comma);
+                suffix.replace(QLatin1String(", ,"), comma);
+            }
+            if (suffix.isEmpty() || suffix == comma)
+                polishedText = myCharacterName;
+            else
+                polishedText = myCharacterName + openB2 + suffix + closeB;
+        };
+
+        if (prevCharElement != nullptr) {
+            const QString prevCharacterName = prevCharElement->text().section('(', 0, 0).trimmed();
+            if (myCharacterName.compare(prevCharacterName, Qt::CaseInsensitive) == 0) {
+                // Include CONT'D if not already done.
+                QString suffix = polishedText.section('(', 1, -1).trimmed();
+                if (suffix.isEmpty())
+                    polishedText += openB2 + contd + closeB;
+            } else {
+                // Remove CONT'D if its there.
+                removeContd();
+            }
+        } else
+            removeContd();
+    }
+
+    if (m_type == SceneElement::Parenthetical) {
+        // Parentheticals must have brackets on either end.
+        polishedText = polishedText.trimmed();
+
+        if (!polishedText.startsWith(openB))
+            polishedText.prepend(openB);
+
+        if (!polishedText.endsWith(closeB))
+            polishedText += closeB;
+    }
+
+    QScopedValueRollback<UndoStack *> undoStackRollback(PushSceneUndoCommand::allowedStack,
+                                                        nullptr);
+    const QString oldText = m_text;
+    this->setText(polishedText);
+    return oldText != m_text;
+}
+
+bool SceneElement::capitalizeSentences()
+{
+    const QList<int> autoCapPositions = this->autoCapitalizePositions();
+    if (autoCapPositions.isEmpty())
+        return false;
+
+    for (int autoCapPosition : autoCapPositions) {
+        const QChar ch = m_text.at(autoCapPosition);
+        m_text[autoCapPosition] = ch.toUpper();
+    }
+
+    return true;
+}
+
+QList<int> SceneElement::autoCapitalizePositions() const
+{
+    // Auto-capitalize needs to be done only on action and dialogue paragraphs.
+    if (!QList<SceneElement::Type>({ SceneElement::Action, SceneElement::Dialogue })
+                 .contains(m_type))
+        return QList<int>();
+
+    return SceneElement::autoCapitalizePositions(m_text);
+}
+
+QList<int> SceneElement::autoCapitalizePositions(const QString &text)
+{
+    QList<int> ret;
+
+    static QList<QChar> sentenceBreaks(
+            { '.', '!', '?' }); // I want to use QChar::isPunct(), but it
+                                // returns true for non-sentence breaking
+                                // punctuations also, which we don't want.
+    bool needsCapping = true;
+    for (int i = 0; i < text.length(); i++) {
+        const QChar ch = text.at(i);
+        if (ch.isSpace())
+            continue;
+
+        if (needsCapping) {
+            needsCapping = false;
+            const QChar uch = ch.toUpper();
+            if (uch != ch)
+                ret.append(i);
+        }
+
+        if (sentenceBreaks.contains(ch))
+            needsCapping = true;
+    }
+
+    // Capitalize I if found anywhere in the text, except at the very end.
+    // Capitalize character names, except at the very end.
+
+    const Structure *structure = ScriteDocument::instance()->structure();
+    const QStringList characterNames = structure->characterNames();
+
+    QTextBoundaryFinder finder(QTextBoundaryFinder::Word, text);
+    while (finder.position() < text.length()) {
+        if (finder.boundaryReasons().testFlag(QTextBoundaryFinder::StartOfItem)) {
+            const int startPos = finder.position();
+            const int endPos = finder.toNextBoundary();
+            if (endPos < 0)
+                break;
+
+            const int length = endPos - startPos;
+            if (length == 0)
+                continue;
+
+            if (startPos == text.length() - length)
+                break; // we don't want to capitalize i if its the last word, because
+                       // the user maybe typing something else after that.
+
+            const QString word = text.mid(startPos, endPos - startPos).section('\'', 0, 0);
+
+            if (length == 1) {
+                if (word == QLatin1String("i"))
+                    ret.append(startPos);
+            } else {
+                if (word.at(0).isLower() && characterNames.contains(word, Qt::CaseInsensitive))
+                    ret.append(startPos);
+            }
+        } else if (finder.toNextBoundary() < 0)
+            break;
+    }
+
+    return ret;
 }
 
 QJsonArray SceneElement::find(const QString &text, int flags) const
@@ -760,6 +988,9 @@ bool DistinctElementValuesMap::include(SceneElement *element)
 
         QString newName = element->formattedText();
         newName = newName.section('(', 0, 0).trimmed();
+        if ((m_type == SceneElement::Shot || m_type == SceneElement::Transition)
+            && newName.endsWith(':'))
+            newName = newName.left(newName.length() - 1);
         if (newName.isEmpty())
             return ret;
 
@@ -848,7 +1079,7 @@ Scene::Scene(QObject *parent) : QAbstractListModel(parent)
     m_padding[0] = 0; // just to get rid of the unused private variable warning.
     m_structureElement = qobject_cast<StructureElement *>(parent);
 
-    connect(this, &Scene::titleChanged, this, &Scene::sceneChanged);
+    connect(this, &Scene::synopsisChanged, this, &Scene::sceneChanged);
     connect(this, &Scene::colorChanged, this, &Scene::sceneChanged);
     connect(this, &Scene::groupsChanged, this, &Scene::sceneChanged);
     connect(m_notes, &Notes::notesModified, this, &Scene::sceneChanged);
@@ -884,7 +1115,7 @@ Scene::~Scene()
 Scene *Scene::clone(QObject *parent) const
 {
     Scene *newScene = new Scene(parent);
-    newScene->setTitle(m_title + QStringLiteral(" [Copy]"));
+    newScene->setSynopsis(m_synopsis + QStringLiteral(" [Copy]"));
     newScene->setColor(m_color);
     newScene->setEnabled(m_enabled);
     newScene->heading()->setMoment(m_heading->moment());
@@ -910,6 +1141,17 @@ Scene *Scene::clone(QObject *parent) const
     return newScene;
 }
 
+bool Scene::isEmpty() const
+{
+    const bool noNotes = (m_notes == nullptr || m_notes->noteCount() == 0);
+    const bool noAttachments = (m_attachments == nullptr || m_attachments->attachmentCount() == 0);
+    const bool noContent = m_elements.isEmpty()
+            || (m_elements.size() == 1 && m_elements.first()->text().isEmpty());
+    const bool noSynopsis = m_synopsis.isEmpty();
+
+    return noNotes && noAttachments && noContent && noSynopsis;
+}
+
 void Scene::setId(const QString &val)
 {
     if (m_id == val || !m_id.isEmpty())
@@ -929,15 +1171,15 @@ QString Scene::id() const
 
 QString Scene::name() const
 {
-    if (m_title.length() > 15)
-        return QString("Scene: %1...").arg(m_title.left(13));
+    if (m_synopsis.length() > 15)
+        return QString("Scene: %1...").arg(m_synopsis.left(13));
 
-    return QString("Scene: %1").arg(m_title);
+    return QString("Scene: %1").arg(m_synopsis);
 }
 
-void Scene::setTitle(const QString &val)
+void Scene::setSynopsis(const QString &val)
 {
-    if (m_title == val)
+    if (m_synopsis == val)
         return;
 
     ObjectPropertyInfo *info = ObjectPropertyInfo::get(this, "title");
@@ -945,15 +1187,18 @@ void Scene::setTitle(const QString &val)
     if (!info->isLocked() && m_undoRedoEnabled)
         cmd.reset(new PushObjectPropertyUndoCommand(this, info->property));
 
-    m_title = val;
-    emit titleChanged();
+    m_synopsis = val;
+    emit synopsisChanged();
 }
 
-void Scene::inferTitleFromContent()
+void Scene::inferSynopsisFromContent()
 {
     /**
      * This function is called from importers to let Scenes infer their synopsis (title) from
      * scene contents.
+     *
+     * If a synopsis is already set (because the importer was able to parse one), then we don't
+     * do anything in here.
      *
      * Here we look for the first action paragraph and extract its first sentence as synopsis.
      * If the scene doesnt have any action paragraph, we extract the first dialogue and infer from
@@ -961,9 +1206,12 @@ void Scene::inferTitleFromContent()
      * disabled, then we leave the title empty.
      */
 
+    if (!m_synopsis.isEmpty())
+        return;
+
     auto setTitleInternal = [=](const QString &val) {
-        m_title = val;
-        emit titleChanged();
+        m_synopsis = val;
+        emit synopsisChanged();
     };
     setTitleInternal(QStringLiteral("Empty Scene"));
 
@@ -1021,12 +1269,12 @@ void Scene::inferTitleFromContent()
     }
 }
 
-void Scene::trimTitle()
+void Scene::trimSynopsis()
 {
-    const QString val = m_title.trimmed();
-    if (m_title != val) {
-        m_title = val;
-        emit titleChanged();
+    const QString val = m_synopsis.trimmed();
+    if (m_synopsis != val) {
+        m_synopsis = val;
+        emit synopsisChanged();
     }
 }
 
@@ -1173,17 +1421,30 @@ void Scene::addMuteCharacter(const QString &characterName)
 {
     HourGlass hourGlass;
 
-    const QList<SceneElement *> elements = m_characterElementMap.characterElements(characterName);
-    if (!elements.isEmpty())
-        return;
+    const QStringList names = [characterName]() -> QStringList {
+        QStringList ret = characterName.split(QChar(','), Qt::SkipEmptyParts);
+        for (QString &name : ret)
+            name = name.trimmed();
+        return ret;
+    }();
 
-    SceneElement *element = new SceneElement(this);
-    element->setProperty("#mute", true);
-    element->setType(SceneElement::Character);
-    element->setText(characterName);
-    emit sceneElementChanged(element, ElementTypeChange);
+    int nrMuteCharactersAdded = 0;
+    for (const QString &name : names) {
+        const QList<SceneElement *> elements = m_characterElementMap.characterElements(name);
+        if (!elements.isEmpty())
+            continue;
 
-    emit sceneChanged();
+        SceneElement *element = new SceneElement(this);
+        element->setProperty("#mute", true);
+        element->setType(SceneElement::Character);
+        element->setText(name);
+        emit sceneElementChanged(element, ElementTypeChange);
+
+        ++nrMuteCharactersAdded;
+    }
+
+    if (nrMuteCharactersAdded > 0)
+        emit sceneChanged();
 }
 
 void Scene::removeMuteCharacter(const QString &characterName)
@@ -1571,6 +1832,32 @@ void Scene::endUndoCapture()
     m_pushUndoCommand = nullptr;
 }
 
+bool Scene::polishText(Scene *previousScene)
+{
+    bool ret = false;
+
+    for (SceneElement *para : qAsConst(m_elements))
+        ret |= para->polishText(previousScene);
+
+    if (ret)
+        emit sceneRefreshed();
+
+    return ret;
+}
+
+bool Scene::capitalizeSentences()
+{
+    bool ret = false;
+
+    for (SceneElement *para : qAsConst(m_elements))
+        ret |= para->capitalizeSentences();
+
+    if (ret)
+        emit sceneRefreshed();
+
+    return ret;
+}
+
 QHash<QString, QList<SceneElement *>> Scene::dialogueElements() const
 {
     QHash<QString, QList<SceneElement *>> ret;
@@ -1606,11 +1893,11 @@ Scene *Scene::splitScene(SceneElement *element, int textPosition, QObject *paren
 
     emit sceneAboutToReset();
 
-    const bool splitTitleAlso = !m_title.trimmed().isEmpty();
+    const bool splitTitleAlso = !m_synopsis.trimmed().isEmpty();
 
     Scene *newScene = new Scene(parent);
     if (splitTitleAlso)
-        newScene->setTitle("2nd Part Of " + this->title());
+        newScene->setSynopsis("2nd Part Of " + this->synopsis());
     newScene->setColor(this->color());
     newScene->heading()->setEnabled(this->heading()->isEnabled());
     newScene->heading()->setLocationType(this->heading()->locationType());
@@ -1619,7 +1906,7 @@ Scene *Scene::splitScene(SceneElement *element, int textPosition, QObject *paren
     newScene->id(); // trigger creation of new Scene ID
 
     if (splitTitleAlso)
-        this->setTitle("1st Part Of " + this->title());
+        this->setSynopsis("1st Part Of " + this->synopsis());
 
     // Move all elements from index onwards to the new scene.
     for (int i = this->elementCount() - 1; i >= index; i--) {
@@ -1730,7 +2017,7 @@ QByteArray Scene::toByteArray() const
     QByteArray bytes;
     QDataStream ds(&bytes, QIODevice::WriteOnly);
     ds << m_id;
-    ds << m_title;
+    ds << m_synopsis;
     ds << m_color;
     ds << m_cursorPosition;
     ds << m_heading->locationType();
@@ -1764,7 +2051,7 @@ bool Scene::resetFromByteArray(const QByteArray &bytes)
 
     QString title;
     ds >> title;
-    this->setTitle(title);
+    this->setSynopsis(title);
 
     QColor color;
     ds >> color;
@@ -1927,6 +2214,11 @@ void Scene::deserializeFromJson(const QJsonObject &json)
         m_notes->loadOldNotes(notes.toArray());
 
     this->evaluateWordCountLater();
+
+    // 'title' property has changed to 'synopsis' since 0.9.3.23
+    const QString titleAttr = QStringLiteral("title");
+    if (json.contains(titleAttr))
+        this->setSynopsis(json.value(titleAttr).toString());
 }
 
 bool Scene::canSetPropertyFromObjectList(const QString &propName) const
@@ -1959,7 +2251,7 @@ void Scene::write(QTextCursor &cursor, const WriteOptions &options) const
     static const QString newline = QStringLiteral("\n");
     QTextDocument *textDocument = cursor.document();
 
-    if (m_title.isEmpty() && m_comments.isEmpty() && (m_notes == nullptr || m_notes->isEmpty()))
+    if (m_synopsis.isEmpty() && m_comments.isEmpty() && (m_notes == nullptr || m_notes->isEmpty()))
         return;
 
     // Scene number: heading
@@ -2016,7 +2308,7 @@ void Scene::write(QTextCursor &cursor, const WriteOptions &options) const
 
     // Synopsis
     if (options.includeSynopsis) {
-        QString synopsis = this->title().trimmed();
+        QString synopsis = this->synopsis().trimmed();
         synopsis.replace(newlinesRegEx, newline);
 
         if (!synopsis.isEmpty()) {
@@ -2075,7 +2367,8 @@ void Scene::write(QTextCursor &cursor, const WriteOptions &options) const
         if (m_heading && m_heading->isEnabled()) {
             SceneElementFormat *headingParaFormat =
                     printFormat->elementFormat(SceneElement::Heading);
-            const QTextBlockFormat headingParaBlockFormat = headingParaFormat->createBlockFormat();
+            const QTextBlockFormat headingParaBlockFormat =
+                    headingParaFormat->createBlockFormat(Qt::Alignment());
             const QTextCharFormat headingParaCharFormat = headingParaFormat->createCharFormat();
             cursor.setBlockFormat(headingParaBlockFormat);
             cursor.setBlockCharFormat(headingParaCharFormat);
@@ -2085,7 +2378,8 @@ void Scene::write(QTextCursor &cursor, const WriteOptions &options) const
 
         for (SceneElement *para : m_elements) {
             SceneElementFormat *paraFormat = printFormat->elementFormat(para->type());
-            const QTextBlockFormat paraBlockFormat = paraFormat->createBlockFormat();
+            const QTextBlockFormat paraBlockFormat =
+                    paraFormat->createBlockFormat(para->alignment());
             const QTextCharFormat paraCharFormat = paraFormat->createCharFormat();
             cursor.setBlockFormat(paraBlockFormat);
             cursor.setBlockCharFormat(paraCharFormat);
@@ -2214,10 +2508,10 @@ void Scene::renameCharacter(const QString &from, const QString &to)
     {
         int nrReplacements = 0;
         const QString newTitle =
-                Application::replaceCharacterName(from, to, m_title, &nrReplacements);
+                Application::replaceCharacterName(from, to, m_synopsis, &nrReplacements);
         if (nrReplacements > 0) {
-            m_title = newTitle;
-            emit titleChanged();
+            m_synopsis = newTitle;
+            emit synopsisChanged();
         }
     }
 
@@ -2321,8 +2615,9 @@ int Scene::staticElementCount(QQmlListProperty<SceneElement> *list)
 SceneSizeHintItem::SceneSizeHintItem(QQuickItem *parent)
     : QQuickItem(parent), m_scene(this, "scene"), m_format(this, "format")
 {
-    this->setFlag(QQuickItem::ItemHasContents, false);
-    this->setVisible(false);
+    this->setFlag(QQuickItem::ItemHasContents, true);
+
+    connect(this, &QQuickItem::visibleChanged, this, &SceneSizeHintItem::updateSizeAndImageLater);
 }
 
 SceneSizeHintItem::~SceneSizeHintItem() { }
@@ -2347,7 +2642,7 @@ void SceneSizeHintItem::setScene(Scene *val)
 
     emit sceneChanged();
 
-    this->evaluateSizeHintLater();
+    this->updateSizeAndImageLater();
 }
 
 void SceneSizeHintItem::setTrackSceneChanges(bool val)
@@ -2386,7 +2681,7 @@ void SceneSizeHintItem::setFormat(ScreenplayFormat *val)
 
     emit formatChanged();
 
-    this->evaluateSizeHintLater();
+    this->updateSizeAndImageLater();
 }
 
 void SceneSizeHintItem::setTrackFormatChanges(bool val)
@@ -2405,53 +2700,37 @@ void SceneSizeHintItem::setTrackFormatChanges(bool val)
                    &SceneSizeHintItem::onFormatChanged);
 }
 
-void SceneSizeHintItem::setLeftMargin(qreal val)
+void SceneSizeHintItem::setAsynchronous(bool val)
 {
-    if (qFuzzyCompare(m_leftMargin, val))
+    if (m_asynchronous == val)
         return;
 
-    m_leftMargin = val;
-    emit leftMarginChanged();
-
-    this->evaluateSizeHintLater();
+    m_asynchronous = val;
+    emit asynchronousChanged();
 }
 
-void SceneSizeHintItem::setRightMargin(qreal val)
+void SceneSizeHintItem::setActive(bool val)
 {
-    if (qFuzzyCompare(m_rightMargin, val))
+    if (m_active == val)
         return;
 
-    m_rightMargin = val;
-    emit rightMarginChanged();
+    m_active = val;
+    emit activeChanged();
 
-    this->evaluateSizeHintLater();
-}
-
-void SceneSizeHintItem::setTopMargin(qreal val)
-{
-    if (qFuzzyCompare(m_topMargin, val))
-        return;
-
-    m_topMargin = val;
-    emit topMarginChanged();
-
-    this->evaluateSizeHintLater();
-}
-
-void SceneSizeHintItem::setBottomMargin(qreal val)
-{
-    if (qFuzzyCompare(m_bottomMargin, val))
-        return;
-
-    m_bottomMargin = val;
-    emit bottomMarginChanged();
-
-    this->evaluateSizeHintLater();
+    if (m_componentComplete) {
+        if (m_active)
+            this->updateSizeAndImageLater();
+        else {
+            m_documentImage = QImage();
+            this->update();
+        }
+    }
 }
 
 void SceneSizeHintItem::classBegin()
 {
     m_componentComplete = false;
+    this->setHasPendingComputeSize(true);
 }
 
 void SceneSizeHintItem::componentComplete()
@@ -2459,7 +2738,115 @@ void SceneSizeHintItem::componentComplete()
     QQuickItem::componentComplete();
 
     m_componentComplete = true;
-    this->evaluateSizeHintLater();
+    if (m_asynchronous)
+        this->updateSizeAndImageLater();
+    else
+        this->updateSizeAndImageNow();
+}
+
+struct SceneSizeHintItem_TaskResult
+{
+    QSizeF documentSize;
+    QImage documentImage;
+};
+Q_DECLARE_METATYPE(SceneSizeHintItem_TaskResult)
+
+SceneSizeHintItem_TaskResult SceneSizeHintItem_Task2(const qreal devicePixelRatio,
+                                                     const Scene *scene,
+                                                     const ScreenplayFormat *format,
+                                                     bool evaluateSize = true,
+                                                     bool evaluateImage = true)
+{
+    SceneSizeHintItem_TaskResult result;
+
+    const qreal pageWidth = format->pageLayout()->contentWidth();
+
+    QTextDocument document;
+    document.setTextWidth(pageWidth);
+    document.setDefaultFont(format->defaultFont());
+
+    QTextCursor cursor(&document);
+
+    if (scene->heading()->isEnabled()) {
+        const SceneElementFormat *style = format->elementFormat(SceneElement::Heading);
+        QTextBlockFormat blockFormat = style->createBlockFormat(Qt::Alignment(), &pageWidth);
+        QTextCharFormat charFormat = style->createCharFormat(&pageWidth);
+        blockFormat.setTopMargin(0);
+
+        cursor.setCharFormat(charFormat);
+        cursor.setBlockFormat(blockFormat);
+#if 0
+        TransliterationUtils::polishFontsAndInsertTextAtCursor(cursor, scene->heading()->text(),
+                                                               QVector<QTextLayout::FormatRange>());
+#else
+        cursor.insertText(scene->heading()->text());
+#endif
+        cursor.insertBlock();
+    }
+
+    for (int j = 0; j < scene->elementCount(); j++) {
+        const SceneElement *para = scene->elementAt(j);
+        const SceneElementFormat *style = format->elementFormat(para->type());
+        if (j)
+            cursor.insertBlock();
+
+        QTextBlockFormat blockFormat = style->createBlockFormat(para->alignment(), &pageWidth);
+        QTextCharFormat charFormat = style->createCharFormat(&pageWidth);
+        if (!scene->heading()->isEnabled() && j == 0)
+            blockFormat.setTopMargin(0);
+
+        cursor.setCharFormat(charFormat);
+        cursor.setBlockFormat(blockFormat);
+#if 0
+        TransliterationUtils::polishFontsAndInsertTextAtCursor(cursor, para->text(),
+                                                               para->textFormats());
+#else
+        cursor.insertText(para->text());
+#endif
+    }
+
+    const QSizeF docSize = document.size() * devicePixelRatio;
+
+    if (evaluateSize)
+        result.documentSize = document.size() * devicePixelRatio;
+
+    if (evaluateImage) {
+        result.documentImage = QImage(docSize.toSize(), QImage::Format_ARGB32);
+        result.documentImage.fill(Qt::transparent);
+        result.documentImage.setDevicePixelRatio(devicePixelRatio);
+
+        QPainter paint(&result.documentImage);
+        paint.setRenderHint(QPainter::Antialiasing);
+        paint.setRenderHint(QPainter::TextAntialiasing);
+        QAbstractTextDocumentLayout::PaintContext context;
+        QAbstractTextDocumentLayout *layout = document.documentLayout();
+        layout->draw(&paint, context);
+        paint.end();
+    }
+
+    return result;
+}
+
+SceneSizeHintItem_TaskResult SceneSizeHintItem_Task(const qreal devicePixelRatio,
+                                                    const QJsonObject &sceneJson,
+                                                    const QJsonObject &formatJson,
+                                                    bool evaluateSize = true,
+                                                    bool evaluateImage = true)
+{
+    SceneSizeHintItem_TaskResult result;
+
+    Scene scene;
+    ScreenplayFormat format;
+    format.resetToFactoryDefaults();
+
+    if (!QObjectSerializer::fromJson(formatJson, &format))
+        return result;
+
+    if (!QObjectSerializer::fromJson(sceneJson, &scene))
+        return result;
+
+    format.pageLayout()->evaluateRectsNow();
+    return SceneSizeHintItem_Task2(devicePixelRatio, &scene, &format, evaluateSize, evaluateImage);
 }
 
 void SceneSizeHintItem::timerEvent(QTimerEvent *te)
@@ -2467,14 +2854,96 @@ void SceneSizeHintItem::timerEvent(QTimerEvent *te)
     if (te->timerId() == m_updateTimer.timerId()) {
         m_updateTimer.stop();
 
-        QFuture<QSizeF> future = QtConcurrent::run(this, &SceneSizeHintItem::evaluateSizeHint);
+        const QString watcherName = QStringLiteral("SceneSizeHintItemFutureWatcher");
 
-        QFutureWatcher<QSizeF> *watcher = new QFutureWatcher<QSizeF>(this);
-        watcher->setFuture(future);
-        connect(watcher, &QFutureWatcher<void>::finished,
-                [=]() { this->updateSize(watcher->result()); });
-        connect(watcher, &QFutureWatcher<void>::finished, watcher, &QObject::deleteLater);
+        QFutureWatcher<SceneSizeHintItem_TaskResult> *watcher =
+                this->findChild<QFutureWatcher<SceneSizeHintItem_TaskResult> *>(watcherName);
+        if (watcher) {
+            this->updateSizeAndImageLater();
+            return;
+        }
+
+        const QQuickWindow *window = this->window();
+        if (!m_componentComplete || !m_active || m_scene == nullptr || m_format == nullptr
+            || window == nullptr) {
+            this->setContentWidth(0);
+            this->setContentHeight(0);
+            this->setHasPendingComputeSize(false);
+            return;
+        }
+
+        if (m_asynchronous) {
+            // Since the result travels from background thread to main thread
+            static int taskResultTypeId = qRegisterMetaType<SceneSizeHintItem_TaskResult>();
+            Q_UNUSED(taskResultTypeId)
+
+            watcher = new QFutureWatcher<SceneSizeHintItem_TaskResult>(this);
+            watcher->setObjectName(watcherName);
+            connect(watcher, &QFutureWatcher<SceneSizeHintItem_TaskResult>::finished, this, [=]() {
+                const SceneSizeHintItem_TaskResult result = watcher->result();
+                m_documentImage = result.documentImage;
+                this->updateSize(result.documentSize);
+                this->update();
+            });
+            connect(watcher, &QFutureWatcher<SceneSizeHintItem_TaskResult>::finished, watcher,
+                    &QObject::deleteLater);
+
+            const QJsonObject sceneJson = QObjectSerializer::toJson(m_scene);
+            const QJsonObject formatJson = QObjectSerializer::toJson(m_format);
+
+            QFuture<SceneSizeHintItem_TaskResult> future =
+                    QtConcurrent::run(SceneSizeHintItem_Task, window->effectiveDevicePixelRatio(),
+                                      sceneJson, formatJson, true, this->isVisible());
+            watcher->setFuture(future);
+        } else {
+            this->updateSizeAndImageNow();
+        }
     }
+}
+
+QSGNode *SceneSizeHintItem::updatePaintNode(QSGNode *oldNode, UpdatePaintNodeData *)
+{
+    const qreal w = this->width();
+    const qreal h = this->height();
+
+    if (oldNode)
+        delete oldNode;
+
+    QSGNode *rootNode = new QSGNode;
+    if (m_documentImage.isNull())
+        return rootNode; // nothing to show
+
+    QSGOpacityNode *opacityNode = new QSGOpacityNode;
+    opacityNode->setFlag(QSGNode::OwnedByParent);
+    opacityNode->setOpacity(this->opacity());
+    rootNode->appendChildNode(opacityNode);
+
+    QSGGeometryNode *geoNode = new QSGGeometryNode;
+    geoNode->setFlags(QSGNode::OwnsGeometry | QSGNode::OwnsMaterial | QSGNode::OwnedByParent);
+    opacityNode->appendChildNode(geoNode);
+
+    QSGGeometry *rectGeo = new QSGGeometry(QSGGeometry::defaultAttributes_TexturedPoint2D(), 6);
+    rectGeo->setDrawingMode(QSGGeometry::DrawTriangles);
+    geoNode->setGeometry(rectGeo);
+
+    QSGGeometry::TexturedPoint2D *rectPoints = rectGeo->vertexDataAsTexturedPoint2D();
+
+    rectPoints[0].set(0.f, 0.f, 0.f, 0.f);
+    rectPoints[1].set(float(w), 0.f, 1.f, 0.f);
+    rectPoints[2].set(float(w), float(h), 1.f, 1.f);
+
+    rectPoints[3].set(0.f, 0.f, 0.f, 0.f);
+    rectPoints[4].set(float(w), float(h), 1.f, 1.f);
+    rectPoints[5].set(0.f, float(h), 0.f, 1.f);
+
+    QSGTexture *texture = this->window()->createTextureFromImage(m_documentImage);
+    QSGOpaqueTextureMaterial *textureMaterial = new QSGOpaqueTextureMaterial;
+    textureMaterial->setFlag(QSGMaterial::Blending);
+    textureMaterial->setFiltering(QSGTexture::Nearest);
+    textureMaterial->setTexture(texture);
+    geoNode->setMaterial(textureMaterial);
+
+    return rootNode;
 }
 
 void SceneSizeHintItem::updateSize(const QSizeF &size)
@@ -2486,53 +2955,31 @@ void SceneSizeHintItem::updateSize(const QSizeF &size)
         this->setHasPendingComputeSize(false);
 }
 
-QSizeF SceneSizeHintItem::evaluateSizeHint()
+void SceneSizeHintItem::updateSizeAndImageLater()
 {
-    m_lock.lockForRead();
-    const QMarginsF margins(m_leftMargin, m_topMargin, m_rightMargin, m_bottomMargin);
-    const qreal pageWidth = this->width();
-    m_lock.unlock();
-
-    QTextDocument document;
-
-    QTextFrameFormat frameFormat;
-    frameFormat.setTopMargin(margins.top());
-    frameFormat.setLeftMargin(margins.left());
-    frameFormat.setRightMargin(margins.right());
-    frameFormat.setBottomMargin(margins.bottom());
-
-    QTextFrame *rootFrame = document.rootFrame();
-    rootFrame->setFrameFormat(frameFormat);
-
-    document.setTextWidth(pageWidth);
-
-    if (m_scene != nullptr && m_format != nullptr) {
-        const qreal maxParaWidth =
-                (pageWidth - margins.left() - margins.right()) / m_format->devicePixelRatio();
-
-        QTextCursor cursor(&document);
-        for (int j = 0; j < m_scene->elementCount(); j++) {
-            const SceneElement *para = m_scene->elementAt(j);
-            const SceneElementFormat *style = m_format->elementFormat(para->type());
-            if (j)
-                cursor.insertBlock();
-
-            const QTextBlockFormat blockFormat = style->createBlockFormat(&maxParaWidth);
-            const QTextCharFormat charFormat = style->createCharFormat(&maxParaWidth);
-            cursor.setBlockFormat(blockFormat);
-            cursor.setCharFormat(charFormat);
-            cursor.insertText(para->text());
-        }
+    if (m_componentComplete) {
+        this->setHasPendingComputeSize(true);
+        m_updateTimer.start(0, this);
     }
-
-    return document.size();
 }
 
-void SceneSizeHintItem::evaluateSizeHintLater()
+void SceneSizeHintItem::updateSizeAndImageNow()
 {
-    this->setHasPendingComputeSize(true);
+    const QQuickWindow *window = this->window();
+    if (!m_componentComplete || !m_active || m_scene == nullptr || m_format == nullptr
+        || window == nullptr) {
+        this->setContentWidth(0);
+        this->setContentHeight(0);
+        this->setHasPendingComputeSize(false);
+        m_documentImage = QImage();
+    } else {
+        const SceneSizeHintItem_TaskResult result = SceneSizeHintItem_Task2(
+                window->effectiveDevicePixelRatio(), m_scene, m_format, true, this->isVisible());
+        m_documentImage = result.documentImage;
+        this->updateSize(result.documentSize);
+    }
 
-    m_updateTimer.start(10, this);
+    this->update();
 }
 
 void SceneSizeHintItem::sceneReset()
@@ -2540,13 +2987,13 @@ void SceneSizeHintItem::sceneReset()
     m_scene = nullptr;
     emit sceneChanged();
 
-    this->evaluateSizeHintLater();
+    this->updateSizeAndImageLater();
 }
 
 void SceneSizeHintItem::onSceneChanged()
 {
     if (m_trackSceneChanges)
-        this->evaluateSizeHintLater();
+        this->updateSizeAndImageLater();
 }
 
 void SceneSizeHintItem::formatReset()
@@ -2554,13 +3001,13 @@ void SceneSizeHintItem::formatReset()
     m_format = nullptr;
     emit formatChanged();
 
-    this->evaluateSizeHintLater();
+    this->updateSizeAndImageLater();
 }
 
 void SceneSizeHintItem::onFormatChanged()
 {
     if (m_trackFormatChanges)
-        this->evaluateSizeHintLater();
+        this->updateSizeAndImageLater();
 }
 
 void SceneSizeHintItem::setContentWidth(qreal val)

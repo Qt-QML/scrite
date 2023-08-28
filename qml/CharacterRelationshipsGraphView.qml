@@ -14,8 +14,8 @@
 import QtQml 2.15
 import QtQuick 2.15
 import QtQuick.Controls 2.15
-
 import io.scrite.components 1.0
+import "../js/utils.js" as Utils
 
 Rectangle {
     id: crGraphView
@@ -52,7 +52,7 @@ Rectangle {
         leftMargin: 1000
         topMargin: 1000
         onUpdated: {
-            Scrite.app.execLater(crGraph, 250, function() {
+            Utils.execLater(crGraph, 250, function() {
                 canvasScroll.animatePanAndZoom = false
                 canvas.zoomFit()
                 canvasScroll.animatePanAndZoom = true
@@ -259,6 +259,7 @@ Rectangle {
                 Item {
                     anchors.fill: canvas.selectedNodeItem
                     visible: canvas.selectedNodeItem
+                    z: 10
 
                     Loader {
                         id: removeRelationshipConfirmation
@@ -458,7 +459,7 @@ Rectangle {
             height: dialogLayout.height + 50
 
             Component.onCompleted: {
-                Scrite.app.execLater(dialogLayout, 100, function() {
+                Utils.execLater(dialogLayout, 100, function() {
                     txtRelationshipName.forceActiveFocus()
                 })
             }
